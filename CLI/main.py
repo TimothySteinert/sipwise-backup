@@ -30,7 +30,11 @@ class SipwiseBackupCLI:
         """Display main menu options"""
         print("\n--- Main Menu ---")
         print("(1) Config Menu")
-        print("(2) Exit")
+        print("(2) Run Manual Backup")
+        print("(3) List Backups")
+        print("(4) Restore from Backup")
+        print("(5) Make DR Instance Live")
+        print("(6) Exit")
         print()
 
     def show_config_menu(self):
@@ -100,6 +104,140 @@ class SipwiseBackupCLI:
                 print(f"\nInvalid choice: {choice}")
                 print("Please select a valid option.")
 
+    def handle_manual_backup(self):
+        """Handle manual backup menu"""
+        in_backup_menu = True
+        while in_backup_menu:
+            print("\n" + "=" * 40)
+            print("Later this will show progress of requested manual backup")
+            print("=" * 40)
+            print("\n(1) Return to main menu")
+            print()
+
+            choice = self.get_user_choice()
+
+            if choice == "1":
+                print("\nReturning to main menu...")
+                in_backup_menu = False
+            elif choice == "exit":
+                self.handle_exit()
+            else:
+                print(f"\nInvalid choice: {choice}")
+                print("Please select a valid option.")
+
+    def handle_list_backups(self):
+        """Handle list backups menu"""
+        in_list_menu = True
+        while in_list_menu:
+            print("\n" + "=" * 40)
+            print("Last backup time: [Will be populated later]")
+            print("=" * 40)
+            print("\nLater this will show a list of backups")
+            print("(Table with backup name and timestamp columns)")
+            print("\n(1) Return to main menu")
+            print()
+
+            choice = self.get_user_choice()
+
+            if choice == "1":
+                print("\nReturning to main menu...")
+                in_list_menu = False
+            elif choice == "exit":
+                self.handle_exit()
+            else:
+                print(f"\nInvalid choice: {choice}")
+                print("Please select a valid option.")
+
+    def handle_restore_backup(self):
+        """Handle restore backup menu"""
+        in_restore_menu = True
+        while in_restore_menu:
+            print("\n" + "=" * 40)
+            print("Available Backups:")
+            print("=" * 40)
+            print("\n[Later this will show numbered list of backups]")
+            print("\nExample:")
+            print("  (1) backup_2026-01-12_10-30-00")
+            print("  (2) backup_2026-01-11_10-30-00")
+            print("  (3) backup_2026-01-10_10-30-00")
+            print("\n(0) Return to main menu")
+            print()
+
+            choice = self.get_user_choice()
+
+            if choice == "0":
+                print("\nReturning to main menu...")
+                in_restore_menu = False
+            elif choice == "exit":
+                self.handle_exit()
+            elif choice.isdigit() and int(choice) > 0:
+                # Simulate backup selection
+                backup_name = f"backup_example_{choice}"
+                self.handle_restore_confirmation(backup_name)
+            else:
+                print(f"\nInvalid choice: {choice}")
+                print("Please select a valid option.")
+
+    def handle_restore_confirmation(self, backup_name):
+        """Handle restore confirmation process"""
+        # Step 1: Confirm restore
+        print(f"\nRestore '{backup_name}'? (Y/N): ", end="")
+        confirm = input().strip().upper()
+
+        if confirm != "Y":
+            print("Restore cancelled.")
+            return
+
+        # Step 2: Overwrite SQL encryption key
+        print(f"\nOverwrite SQL encryption key? (Y/N): ", end="")
+        sql_key = input().strip().upper()
+
+        # Step 3: Restore SIP register data with warning
+        print("\n" + "!" * 60)
+        print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
+        print("If restoring to a disaster recovery server,")
+        print("ensure the main server is offline.")
+        print("!" * 60)
+        print(f"\nRestore SIP register data? (Y/N): ", end="")
+        sip_register = input().strip().upper()
+
+        print("\n[Restore process would execute here]")
+        print(f"Backup: {backup_name}")
+        print(f"SQL Key Overwrite: {sql_key}")
+        print(f"SIP Register: {sip_register}")
+        print("\nPress Enter to return to main menu...")
+        input()
+
+    def handle_make_dr_live(self):
+        """Handle making DR instance live"""
+        in_dr_menu = True
+        while in_dr_menu:
+            print("\n" + "!" * 60)
+            print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
+            print("If restoring to a disaster recovery server,")
+            print("ensure the main server is offline.")
+            print("!" * 60)
+            print("\nAre you sure you want to make this DR instance a live instance?")
+            print("\n(Y) Yes, make live")
+            print("(N) No, return to main menu")
+            print()
+
+            choice = self.get_user_choice().upper()
+
+            if choice == "Y":
+                print("\n[DR instance would be made live here]")
+                print("Press Enter to return to main menu...")
+                input()
+                in_dr_menu = False
+            elif choice == "N":
+                print("\nReturning to main menu...")
+                in_dr_menu = False
+            elif choice == "EXIT":
+                self.handle_exit()
+            else:
+                print(f"\nInvalid choice: {choice}")
+                print("Please enter Y or N.")
+
     def handle_exit(self):
         """Handle exit command"""
         print("\nExiting sipwise-backup...")
@@ -111,6 +249,14 @@ class SipwiseBackupCLI:
         if choice == "1":
             self.handle_config_menu()
         elif choice == "2":
+            self.handle_manual_backup()
+        elif choice == "3":
+            self.handle_list_backups()
+        elif choice == "4":
+            self.handle_restore_backup()
+        elif choice == "5":
+            self.handle_make_dr_live()
+        elif choice == "6":
             self.handle_exit()
         elif choice == "exit":
             self.handle_exit()
