@@ -4,6 +4,7 @@
 
 # Instance type: master | dr
 instance_type: master
+server_name: sipwise-server-01
 
 # ----------------------------------------------------------
 # Storage Settings
