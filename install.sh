@@ -86,14 +86,23 @@ cp "./service/$APP_NAME.service" "$SERVICE_DIR/"
 echo "Reloading systemd daemon..."
 systemctl daemon-reload
 
+# Enable the service
+echo "Enabling $APP_NAME service..."
+systemctl enable "$APP_NAME.service"
+
+# Start the service
+echo "Starting $APP_NAME service..."
+systemctl start "$APP_NAME.service"
+
 echo ""
 echo -e "${GREEN}✓ Installation completed successfully!${NC}"
 echo ""
+echo "The $APP_NAME service has been enabled and started."
+echo ""
 echo "You can now:"
 echo "  1. Run the CLI: $APP_NAME"
-echo "  2. Enable the service: sudo systemctl enable $APP_NAME"
-echo "  3. Start the service: sudo systemctl start $APP_NAME"
-echo "  4. Check service status: sudo systemctl status $APP_NAME"
+echo "  2. Check service status: sudo systemctl status $APP_NAME"
+echo "  3. View service logs: sudo journalctl -u $APP_NAME -f"
 echo ""
 echo "To uninstall, run: sudo ./uninstall.sh"
 echo ""
