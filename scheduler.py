@@ -107,8 +107,9 @@ class BackupScheduler:
 
         If cleanup is enabled with mode 'last_per_day':
         - Groups backups by calendar day
-        - Keeps only the last (most recent) backup of each day
-        - Deletes all other backups from that day
+        - Skips the current day (today) - all backups are preserved
+        - For previous days: keeps only the last (most recent) backup
+        - Deletes all other backups from previous days
         """
         backup_config = self.config.get('backup', {})
         cleanup_config = backup_config.get('cleanup', {})
@@ -143,9 +144,15 @@ class BackupScheduler:
 
             backups_by_day[day_key].append(backup)
 
+        # Get today's date string for comparison
+        today_key = datetime.now().strftime('%Y-%m-%d')
+
         # For each day, keep only the last backup
         deleted_count = 0
         for day_key, day_backups in backups_by_day.items():
+            # Skip the current day - only cleanup previous days
+            if day_key == today_key:
+                continue
             if len(day_backups) <= 1:
                 # Only one backup for this day, keep it
                 continue
