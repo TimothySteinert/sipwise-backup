@@ -130,9 +130,9 @@ class BackupScheduler:
         print("[!] Initiating system reboot...")
         print("=" * 80)
         
-        # Use subprocess to run the reboot command
+        # Use subprocess to run the reboot command with full path for security
         try:
-            subprocess.run(['reboot'], check=True)
+            subprocess.run(['/sbin/reboot'], check=True)
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] Reboot command failed: {e}")
         except PermissionError:
