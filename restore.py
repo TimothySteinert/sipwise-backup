@@ -163,8 +163,8 @@ class RestoreManager:
                 f"Line {self.firewall_enable_line} does not appear to be firewall enable setting: {old_line}"
             )
         
-        # Get the indentation and replace value
-        indent = old_line.split("enable:")[0]
+        # Get the indentation and replace value (limit split to first occurrence)
+        indent = old_line.split("enable:", 1)[0]
         new_line = f"{indent}enable: no\n"
         
         lines[self.firewall_enable_line - 1] = new_line
@@ -241,7 +241,7 @@ class RestoreManager:
                 f"Line {self.target_key_line} in restored constants.yml is not a key: {old_line}"
             )
 
-        indent = old_line.split("key:")[0]
+        indent = old_line.split("key:", 1)[0]
         new_line = f"{indent}key: {key}\n"
 
         lines[self.target_key_line - 1] = new_line
