@@ -67,7 +67,8 @@ class BackupScheduler:
         """
         Apply retention policy to delete old backups
 
-        Deletes backups older than the configured retention days
+        Deletes automatic and unknown backups older than the configured retention days.
+        Manual backups are exempt from retention policy.
         """
         backup_config = self.config.get('backup', {})
         retention_config = backup_config.get('retention', {})
@@ -88,14 +89,24 @@ class BackupScheduler:
 
         # Find backups to delete
         deleted_count = 0
+        skipped_manual_count = 0
         for backup in backups:
             backup_date = backup['datetime']
+            backup_type = backup.get('type', 'unknown')
+            
+            # Skip manual backups - they are exempt from retention policy
+            if backup_type == 'manual':
+                skipped_manual_count += 1
+                continue
+            
             if backup_date < cutoff_date:
                 filename = backup['filename']
                 print(f"    Deleting old backup: {filename}")
                 if self.storage.delete_backup(filename):
                     deleted_count += 1
 
+        if skipped_manual_count > 0:
+            print(f"    Skipped {skipped_manual_count} manual backup(s) (exempt from retention)")
         if deleted_count > 0:
             print(f"    Deleted {deleted_count} old backup(s)")
         else:
@@ -106,7 +117,8 @@ class BackupScheduler:
         Apply cleanup policy to keep only last backup per day
 
         If cleanup is enabled with mode 'last_per_day':
-        - Groups backups by calendar day
+        - Groups automatic and unknown backups by calendar day
+        - Manual backups are completely excluded from cleanup
         - Skips the current day (today) - all backups are preserved
         - For previous days: keeps only the last (most recent) backup
         - Deletes all other backups from previous days
@@ -133,9 +145,26 @@ class BackupScheduler:
             print("    No backups to process")
             return
 
+        # Filter out manual backups - they are exempt from cleanup
+        auto_backups = []
+        manual_count = 0
+        for backup in backups:
+            backup_type = backup.get('type', 'unknown')
+            if backup_type == 'manual':
+                manual_count += 1
+            else:
+                auto_backups.append(backup)
+
+        if manual_count > 0:
+            print(f"    Excluding {manual_count} manual backup(s) from cleanup")
+
+        if not auto_backups:
+            print("    No automatic backups to process")
+            return
+
         # Group backups by date (day)
         backups_by_day = {}
-        for backup in backups:
+        for backup in auto_backups:
             backup_date = backup['datetime']
             day_key = backup_date.strftime('%Y-%m-%d')
 
@@ -182,8 +211,8 @@ class BackupScheduler:
         print(f"SCHEDULED BACKUP - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         print("=" * 80)
 
-        # Run backup
-        result = self.backup_manager.run_backup()
+        # Run backup with type="auto"
+        result = self.backup_manager.run_backup(backup_type="auto")
 
         if result:
             print(f"\n[OK] Scheduled backup completed: {result}")

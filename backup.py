@@ -142,7 +142,7 @@ class BackupManager:
             print(f"Error dumping MySQL database: {e}")
             return False
 
-    def run_backup(self) -> Optional[str]:
+    def run_backup(self, backup_type: str = "auto") -> Optional[str]:
         """
         Execute a full backup operation
 
@@ -153,6 +153,9 @@ class BackupManager:
         4. Zip backup directory
         5. Save to configured storage
         6. Clean up temporary files
+
+        Args:
+            backup_type: Type of backup ("auto" or "manual")
 
         Returns:
             Backup filename if successful, None otherwise
@@ -177,7 +180,7 @@ class BackupManager:
                 raise Exception("MySQL dump failed - aborting backup")
 
             # Step 4: Generate backup name and zip
-            backup_filename = self.storage.generate_backup_name()
+            backup_filename = self.storage.generate_backup_name(backup_type=backup_type)
             print(f"[+] Creating backup archive: {backup_filename}")
 
             zip_path = self.storage.zip_directory(

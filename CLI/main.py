@@ -18,6 +18,9 @@ from restore import RestoreManager
 
 class SipwiseBackupCLI:
     """Main CLI class for sipwise-backup application"""
+    
+    # Table formatting constants
+    BACKUP_TABLE_SEPARATOR_LENGTH = 77  # Length of separator line for backup tables
 
     def __init__(self):
         self.version = "1.0.0"
@@ -134,7 +137,7 @@ class SipwiseBackupCLI:
             print("Starting manual backup...")
             print()
 
-            result = backup_manager.run_backup()
+            result = backup_manager.run_backup(backup_type="manual")
 
             print()
             if result:
@@ -190,15 +193,18 @@ class SipwiseBackupCLI:
                     page_backups = backups[start_idx:end_idx]
 
                     # Display table header
-                    print(f"{'#':<4} {'Server Name':<25} {'Type':<10} {'Date & Time':<20}")
-                    print("-" * 80)
+                    print(f"{'#':<4} {'Server Name':<25} {'Type':<12} {'Backup Type':<12} {'Date & Time':<20}")
+                    print("-" * self.BACKUP_TABLE_SEPARATOR_LENGTH)
 
                     # Display backups
                     for idx, backup in enumerate(page_backups, start=start_idx + 1):
                         server_name = backup['server_name']
                         instance_type = backup['instance_type']
+                        backup_type = backup.get('type', 'unknown')
+                        # Display type with capitalization
+                        type_display = backup_type.capitalize() if backup_type != 'unknown' else 'Unknown'
                         dt = backup['datetime'].strftime('%d/%m/%Y %H:%M')
-                        print(f"{idx:<4} {server_name:<25} {instance_type:<10} {dt:<20}")
+                        print(f"{idx:<4} {server_name:<25} {instance_type:<12} {type_display:<12} {dt:<20}")
 
                     print()
                     print(f"Page {current_page + 1} of {total_pages} (Total backups: {len(backups)})")
@@ -264,14 +270,17 @@ class SipwiseBackupCLI:
                     continue
 
                 # Display available backups
-                print(f"{'#':<4} {'Server Name':<25} {'Type':<10} {'Date & Time':<20}")
-                print("-" * 80)
+                print(f"{'#':<4} {'Server Name':<25} {'Type':<12} {'Backup Type':<12} {'Date & Time':<20}")
+                print("-" * self.BACKUP_TABLE_SEPARATOR_LENGTH)
 
                 for idx, backup in enumerate(backups, start=1):
                     server_name = backup['server_name']
                     instance_type = backup['instance_type']
+                    backup_type = backup.get('type', 'unknown')
+                    # Display type with capitalization
+                    type_display = backup_type.capitalize() if backup_type != 'unknown' else 'Unknown'
                     dt = backup['datetime'].strftime('%d/%m/%Y %H:%M')
-                    print(f"{idx:<4} {server_name:<25} {instance_type:<10} {dt:<20}")
+                    print(f"{idx:<4} {server_name:<25} {instance_type:<12} {type_display:<12} {dt:<20}")
 
                 print()
                 print("(0) Return to main menu")
