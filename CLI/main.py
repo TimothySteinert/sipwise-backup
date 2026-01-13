@@ -12,6 +12,7 @@ import subprocess
 # Add parent directory to path to import backup module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backup import BackupManager
+from storage import StorageManager
 
 
 class SipwiseBackupCLI:
@@ -155,28 +156,84 @@ class SipwiseBackupCLI:
 
     def handle_list_backups(self):
         """Handle list backups menu"""
-        in_list_menu = True
-        while in_list_menu:
+        try:
+            storage = StorageManager(self.config_file)
+            backups = storage.list_backups()
+            page_size = 15
+            current_page = 0
+            total_pages = (len(backups) + page_size - 1) // page_size if backups else 1
+
+            in_list_menu = True
+            while in_list_menu:
+                self.clear_screen()
+                self.show_banner()
+                print("=" * 80)
+                print("Backup List")
+                print("=" * 80)
+                print()
+
+                # Show last backup time
+                last_backup = storage.get_last_backup_time()
+                if last_backup:
+                    print(f"Latest backup: {last_backup.strftime('%d/%m/%Y %H:%M')}")
+                else:
+                    print("Latest backup: No backups found")
+                print()
+
+                if not backups:
+                    print("No backups available.")
+                    print()
+                else:
+                    # Calculate page slice
+                    start_idx = current_page * page_size
+                    end_idx = min(start_idx + page_size, len(backups))
+                    page_backups = backups[start_idx:end_idx]
+
+                    # Display table header
+                    print(f"{'#':<4} {'Server Name':<25} {'Type':<10} {'Date & Time':<20}")
+                    print("-" * 80)
+
+                    # Display backups
+                    for idx, backup in enumerate(page_backups, start=start_idx + 1):
+                        server_name = backup['server_name']
+                        instance_type = backup['instance_type']
+                        dt = backup['datetime'].strftime('%d/%m/%Y %H:%M')
+                        print(f"{idx:<4} {server_name:<25} {instance_type:<10} {dt:<20}")
+
+                    print()
+                    print(f"Page {current_page + 1} of {total_pages} (Total backups: {len(backups)})")
+                    print()
+
+                # Show navigation options
+                print("Options:")
+                if total_pages > 1:
+                    if current_page > 0:
+                        print("  (P) Previous page")
+                    if current_page < total_pages - 1:
+                        print("  (N) Next page")
+                print("  (1) Return to main menu")
+                print()
+
+                choice = self.get_user_choice().upper()
+
+                if choice == "1":
+                    in_list_menu = False
+                elif choice == "N" and current_page < total_pages - 1:
+                    current_page += 1
+                elif choice == "P" and current_page > 0:
+                    current_page -= 1
+                elif choice == "EXIT":
+                    self.handle_exit()
+                else:
+                    print(f"\nInvalid choice: {choice}")
+                    print("Please select a valid option.")
+                    input("\nPress Enter to continue...")
+
+        except Exception as e:
             self.clear_screen()
             self.show_banner()
-            print("=" * 40)
-            print("Last backup time: [Will be populated later]")
-            print("=" * 40)
-            print("\nLater this will show a list of backups")
-            print("(Table with backup name and timestamp columns)")
-            print("\n(1) Return to main menu")
-            print()
-
-            choice = self.get_user_choice()
-
-            if choice == "1":
-                in_list_menu = False
-            elif choice == "exit":
-                self.handle_exit()
-            else:
-                print(f"\nInvalid choice: {choice}")
-                print("Please select a valid option.")
-                input("\nPress Enter to continue...")
+            print(f"Error listing backups: {e}")
+            input("\nPress Enter to return to main menu...")
 
         self.clear_screen()
         self.show_banner()
