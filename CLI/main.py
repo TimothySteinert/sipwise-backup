@@ -13,6 +13,7 @@ import subprocess
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backup import BackupManager
 from storage import StorageManager
+from restore import RestoreManager
 
 
 class SipwiseBackupCLI:
@@ -240,67 +241,135 @@ class SipwiseBackupCLI:
 
     def handle_restore_backup(self):
         """Handle restore backup menu"""
-        in_restore_menu = True
-        while in_restore_menu:
+        try:
+            storage = StorageManager(self.config_file)
+            backups = storage.list_backups()
+
+            in_restore_menu = True
+            while in_restore_menu:
+                self.clear_screen()
+                self.show_banner()
+                print("=" * 80)
+                print("Restore from Backup")
+                print("=" * 80)
+                print()
+
+                if not backups:
+                    print("No backups available for restore.")
+                    print()
+                    print("(1) Return to main menu")
+                    print()
+                    choice = self.get_user_choice()
+                    if choice == "1" or choice.upper() == "EXIT":
+                        in_restore_menu = False
+                    continue
+
+                # Display available backups
+                print(f"{'#':<4} {'Server Name':<25} {'Type':<10} {'Date & Time':<20}")
+                print("-" * 80)
+
+                for idx, backup in enumerate(backups, start=1):
+                    server_name = backup['server_name']
+                    instance_type = backup['instance_type']
+                    dt = backup['datetime'].strftime('%d/%m/%Y %H:%M')
+                    print(f"{idx:<4} {server_name:<25} {instance_type:<10} {dt:<20}")
+
+                print()
+                print("(0) Return to main menu")
+                print()
+
+                choice = self.get_user_choice()
+
+                if choice == "0":
+                    in_restore_menu = False
+                elif choice.upper() == "EXIT":
+                    self.handle_exit()
+                elif choice.isdigit() and 1 <= int(choice) <= len(backups):
+                    # User selected a valid backup
+                    selected_backup = backups[int(choice) - 1]
+                    self.handle_restore_confirmation(selected_backup)
+                else:
+                    print(f"\nInvalid choice: {choice}")
+                    print("Please select a valid option.")
+                    input("\nPress Enter to continue...")
+
+        except Exception as e:
             self.clear_screen()
             self.show_banner()
-            print("=" * 40)
-            print("Available Backups:")
-            print("=" * 40)
-            print("\n[Later this will show numbered list of backups]")
-            print("\nExample:")
-            print("  (1) backup_2026-01-12_10-30-00")
-            print("  (2) backup_2026-01-11_10-30-00")
-            print("  (3) backup_2026-01-10_10-30-00")
-            print("\n(0) Return to main menu")
-            print()
-
-            choice = self.get_user_choice()
-
-            if choice == "0":
-                in_restore_menu = False
-            elif choice == "exit":
-                self.handle_exit()
-            elif choice.isdigit() and int(choice) > 0:
-                # Simulate backup selection
-                backup_name = f"backup_example_{choice}"
-                self.handle_restore_confirmation(backup_name)
-            else:
-                print(f"\nInvalid choice: {choice}")
-                print("Please select a valid option.")
-                input("\nPress Enter to continue...")
+            print(f"Error in restore menu: {e}")
+            input("\nPress Enter to return to main menu...")
+            in_restore_menu = False
 
         self.clear_screen()
         self.show_banner()
 
-    def handle_restore_confirmation(self, backup_name):
+    def handle_restore_confirmation(self, backup):
         """Handle restore confirmation process"""
+        self.clear_screen()
+        self.show_banner()
+
+        backup_name = backup['filename']
+        print("=" * 80)
+        print("Restore Confirmation")
+        print("=" * 80)
+        print()
+        print(f"Backup: {backup_name}")
+        print(f"Server: {backup['server_name']}")
+        print(f"Type: {backup['instance_type']}")
+        print(f"Date: {backup['datetime'].strftime('%d/%m/%Y %H:%M')}")
+        print()
+
         # Step 1: Confirm restore
-        print(f"\nRestore '{backup_name}'? (Y/N): ", end="")
+        print("Restore this backup? (Y/N): ", end="")
         confirm = input().strip().upper()
 
         if confirm != "Y":
-            print("Restore cancelled.")
+            print("\nRestore cancelled.")
+            input("\nPress Enter to continue...")
             return
 
-        # Step 2: Overwrite SQL encryption key
-        print(f"\nOverwrite SQL encryption key? (Y/N): ", end="")
-        sql_key = input().strip().upper()
+        # Step 2: Preserve SQL encryption key
+        print("\nPreserve current SQL encryption key? (Y/N): ", end="")
+        preserve_key = input().strip().upper()
+        preserve_sql_key = (preserve_key == "Y")
 
         # Step 3: Restore SIP register data with warning
-        print("\n" + "!" * 60)
-        print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
+        print("\n" + "!" * 80)
+        print("WARNING: RESTORING SIP REGISTER DATA WILL MAKE THE ENVIRONMENT LIVE!")
         print("If restoring to a disaster recovery server,")
         print("ensure the main server is offline.")
-        print("!" * 60)
-        print(f"\nRestore SIP register data? (Y/N): ", end="")
+        print("!" * 80)
+        print("\nRestore SIP register data? (Y/N): ", end="")
         sip_register = input().strip().upper()
+        restore_sip_register = (sip_register == "Y")
 
-        print("\n[Restore process would execute here]")
-        print(f"Backup: {backup_name}")
-        print(f"SQL Key Overwrite: {sql_key}")
-        print(f"SIP Register: {sip_register}")
-        print("\nPress Enter to return to main menu...")
+        # Execute restore
+        print()
+        print("=" * 80)
+        print("Starting restore operation...")
+        print("=" * 80)
+        print()
+
+        try:
+            restore_manager = RestoreManager(self.config_file)
+            success = restore_manager.run_restore(
+                backup_name,
+                preserve_sql_key=preserve_sql_key,
+                restore_sip_register=restore_sip_register
+            )
+
+            print()
+            if success:
+                print("✓ Restore completed successfully!")
+            else:
+                print("✗ Restore failed. Check the output above for errors.")
+
+        except Exception as e:
+            print()
+            print(f"✗ Error during restore: {e}")
+
+        print()
+        print("Press Enter to return to main menu...")
         input()
 
     def handle_make_dr_live(self):
