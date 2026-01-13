@@ -96,8 +96,7 @@ class SipwiseLogger:
     
     def debug(self, message: str, module: str = ""):
         """Log debug message"""
-        extra = {'module': module} if module else {}
-        self.logger.debug(message, extra=extra if extra else None)
+        self.logger.debug(message)
     
     def info(self, message: str, module: str = ""):
         """Log info message"""
@@ -153,6 +152,7 @@ class SipwiseLogger:
 
 # Global logger instance
 _logger_instance: Optional[SipwiseLogger] = None
+_logger_config_path: Optional[str] = None
 
 
 def get_logger(config_path: str = "/opt/sipwise-backup/config.yml") -> SipwiseLogger:
@@ -164,10 +164,15 @@ def get_logger(config_path: str = "/opt/sipwise-backup/config.yml") -> SipwiseLo
         
     Returns:
         SipwiseLogger instance
+        
+    Note:
+        The logger instance is shared globally. If called with different config_path
+        values, only the first config_path will be used.
     """
-    global _logger_instance
+    global _logger_instance, _logger_config_path
     if _logger_instance is None:
         _logger_instance = SipwiseLogger(config_path)
+        _logger_config_path = config_path
     return _logger_instance
 
 
