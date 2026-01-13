@@ -17,6 +17,7 @@ import shutil
 from storage import StorageManager
 from backup import BackupManager
 from logger import get_logger
+from emailer import get_emailer
 
 
 
@@ -37,6 +38,7 @@ class BackupScheduler:
         self.running = False
         self.last_reboot_month = None  # Track last reboot to prevent duplicates
         self.logger = get_logger(config_path)
+        self.emailer = get_emailer(config_path)
         self.state_dir = Path("/opt/sipwise-backup/state")
         self.state_file = self.state_dir / "scheduler_state.json"
         self._ensure_state_dir()
@@ -177,28 +179,40 @@ class BackupScheduler:
                     break
         
         if not reboot_cmd:
-            print("[ERROR] Reboot command not found on this system")
+            error_msg = "Reboot command not found on this system"
+            self._handle_reboot_error(error_msg)
             return
         
         # Use subprocess to run the reboot command
         try:
             subprocess.run([reboot_cmd], check=True)
+            # Send success email after reboot command executes successfully
+            self.emailer.send_reboot_success()
         except subprocess.CalledProcessError as e:
-            print(f"[ERROR] Reboot command failed: {e}")
+            self._handle_reboot_error(f"Reboot command failed: {e}")
         except PermissionError:
-            print("[ERROR] Insufficient permissions to execute reboot command")
+            self._handle_reboot_error("Insufficient permissions to execute reboot command")
         except FileNotFoundError:
-            print("[ERROR] Reboot command not found")
+            self._handle_reboot_error("Reboot command not found")
         except Exception as e:
-            print(f"[ERROR] Unexpected error during reboot: {e}")
+            self._handle_reboot_error(f"Unexpected error during reboot: {e}")
+    
+    def _handle_reboot_error(self, error_msg: str):
+        """Helper method to handle reboot errors consistently"""
+        print(f"[ERROR] {error_msg}")
+        self.logger.error(error_msg)
+        self.emailer.send_reboot_failure(error_message=error_msg)
 
-    def apply_retention_policy(self):
+    def apply_retention_policy(self) -> int:
         """
         Apply retention policy to delete old backups
 
         Deletes automatic and unknown backups older than the configured retention days.
         Manual backups are exempt from retention policy.
         Only applies to backups matching the current server name.
+        
+        Returns:
+            Number of backups deleted
         """
         backup_config = self.config.get('backup', {})
         retention_config = backup_config.get('retention', {})
@@ -265,8 +279,10 @@ class BackupScheduler:
         
         # Also apply retention to log files
         self.logger.apply_retention_policy()
+        
+        return deleted_count
 
-    def apply_cleanup_policy(self):
+    def apply_cleanup_policy(self) -> int:
         """
         Apply cleanup policy to keep only last backup per day
 
@@ -277,6 +293,9 @@ class BackupScheduler:
         - For previous days: keeps only the last (most recent) backup
         - Deletes all other backups from previous days
         - Only applies to backups matching the current server name
+        
+        Returns:
+            Number of backups deleted
         """
         backup_config = self.config.get('backup', {})
         cleanup_config = backup_config.get('cleanup', {})
@@ -287,12 +306,12 @@ class BackupScheduler:
         if not cleanup_enabled:
             self.logger.debug("Cleanup policy disabled, skipping")
             print("[+] Cleanup policy disabled, skipping")
-            return
+            return 0
 
         if cleanup_mode != 'last_per_day':
             self.logger.warn(f"Unknown cleanup mode: {cleanup_mode}, skipping")
             print(f"[+] Unknown cleanup mode: {cleanup_mode}, skipping")
-            return
+            return 0
 
         self.logger.info("Applying cleanup policy (last per day)")
         print("[+] Applying cleanup policy (last per day)")
@@ -303,7 +322,7 @@ class BackupScheduler:
         if not backups:
             self.logger.debug("No backups to process")
             print("    No backups to process")
-            return
+            return 0
 
         # Filter backups to only those matching current server name
         matching_backups = [b for b in backups if b.get('server_name') == current_server_name]
@@ -316,7 +335,7 @@ class BackupScheduler:
         if not matching_backups:
             self.logger.debug("No backups matching current server name")
             print("    No backups matching current server name")
-            return
+            return 0
 
         # Filter out manual backups - they are exempt from cleanup
         auto_backups = []
@@ -335,7 +354,7 @@ class BackupScheduler:
         if not auto_backups:
             self.logger.debug("No automatic backups to process")
             print("    No automatic backups to process")
-            return
+            return 0
 
         # Group backups by date (day)
         backups_by_day = {}
@@ -380,6 +399,8 @@ class BackupScheduler:
         else:
             self.logger.debug("No duplicate backups to delete")
             print("    No duplicate backups to delete")
+        
+        return deleted_count
 
     def run_scheduled_backup(self):
         """
@@ -399,11 +420,26 @@ class BackupScheduler:
 
             # Apply retention policy
             print()
-            self.apply_retention_policy()
+            retention_deleted = self.apply_retention_policy()
 
             # Apply cleanup policy
             print()
-            self.apply_cleanup_policy()
+            cleanup_deleted = self.apply_cleanup_policy()
+            
+            # Check if cleanup is enabled
+            backup_config = self.config.get('backup', {})
+            cleanup_config = backup_config.get('cleanup', {})
+            cleanup_enabled = cleanup_config.get('enabled', False)
+            
+            # Send success email with maintenance info
+            total_deleted = retention_deleted + cleanup_deleted
+            self.emailer.send_backup_success(
+                backup_filename=result,
+                storage_location=self.storage.get_storage_directory(),
+                retention_applied=True,
+                cleanup_applied=cleanup_enabled,
+                deleted_count=total_deleted
+            )
 
             print("\n" + "=" * 80)
             print("SCHEDULED BACKUP COMPLETE")
@@ -412,6 +448,12 @@ class BackupScheduler:
             self.logger.error("Scheduled backup failed")
             print("\n[ERROR] Scheduled backup failed!")
             print("=" * 80)
+            
+            # Send failure email
+            self.emailer.send_backup_failure(
+                error_message="Backup process failed. Check logs for details.",
+                stage="backup execution"
+            )
 
     def run(self):
         """

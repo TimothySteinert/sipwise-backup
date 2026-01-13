@@ -39,6 +39,21 @@ fi
 
 echo -e "${GREEN}✓ Python3 found: $(python3 --version)${NC}"
 
+# Check for required Python modules
+echo "Checking Python dependencies..."
+
+# Test if smtplib is available (should be built-in)
+if ! python3 -c "import smtplib" 2>/dev/null; then
+    echo -e "${YELLOW}Warning: Python smtplib not available. Email notifications may not work.${NC}"
+fi
+
+# Test if email.mime is available (should be built-in)
+if ! python3 -c "from email.mime.text import MIMEText" 2>/dev/null; then
+    echo -e "${YELLOW}Warning: Python email module not available. Email notifications may not work.${NC}"
+fi
+
+echo -e "${GREEN}✓ Python dependencies checked${NC}"
+
 # Check if zip file exists in current directory
 if [ ! -f "./$ZIP_FILE" ]; then
     echo -e "${RED}Error: $ZIP_FILE not found in current directory${NC}"

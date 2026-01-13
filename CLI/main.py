@@ -8,6 +8,7 @@ Version: 1.0.0
 import sys
 import os
 import subprocess
+import traceback
 
 # Add parent directory to path to import backup module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -62,7 +63,9 @@ class SipwiseBackupCLI:
         print("\n--- Config Menu ---")
         print("(1) Edit config.yml")
         print("(2) Restart service")
-        print("(3) Return to main menu")
+        print("(3) Test Send Email")
+        print("(4) Test FTP Connection")
+        print("(5) Return to main menu")
         print()
 
     def get_user_choice(self):
@@ -103,6 +106,122 @@ class SipwiseBackupCLI:
         except PermissionError:
             print("Error: Permission denied. Try running:")
             print("  sudo systemctl restart sipwise-backup")
+    
+    def test_send_email(self):
+        """Test email configuration by sending a test email"""
+        print("\n" + "=" * 60)
+        print("Test Email Configuration")
+        print("=" * 60)
+        print()
+        
+        try:
+            # Import emailer module (path already configured at module level)
+            from emailer import EmailNotifier
+            
+            # Create emailer instance
+            emailer = EmailNotifier(self.config_file)
+            
+            # Check if email is enabled
+            if not emailer.is_enabled():
+                print("Email notifications are currently DISABLED in config.yml")
+                print()
+                print("To enable email notifications:")
+                print("  1. Edit config.yml (option 1 from config menu)")
+                print("  2. Set email.enabled to true")
+                print("  3. Configure SMTP settings")
+                print()
+                input("Press Enter to continue...")
+                return
+            
+            # Display current config
+            email_config = emailer.config.get('email', {})
+            smtp_config = email_config.get('smtp', {})
+            print("Current Email Configuration:")
+            print(f"  SMTP Host: {smtp_config.get('host')}")
+            print(f"  SMTP Port: {smtp_config.get('port')}")
+            print(f"  Username: {smtp_config.get('username')}")
+            print(f"  Use TLS: {smtp_config.get('use_tls')}")
+            print(f"  Use SSL: {smtp_config.get('use_ssl')}")
+            print(f"  From: {email_config.get('from_address')}")
+            print(f"  To: {email_config.get('to_address')}")
+            print()
+            
+            print("Sending test email...")
+            print()
+            
+            # Send test email
+            success = emailer.test_send_email()
+            
+            print()
+            if success:
+                print("✓ Test email sent successfully!")
+                print(f"  Check your inbox at: {email_config.get('to_address')}")
+            else:
+                print("✗ Failed to send test email.")
+                print("  Check the error messages above for details.")
+            
+        except Exception as e:
+            print(f"✗ Error testing email: {e}")
+            traceback.print_exc()
+        
+        print()
+        input("Press Enter to continue...")
+    
+    def test_ftp_connection(self):
+        """Test FTP configuration by connecting to the FTP server"""
+        print("\n" + "=" * 60)
+        print("Test FTP Connection")
+        print("=" * 60)
+        print()
+        
+        try:
+            # Check if storage type is remote
+            storage = self.storage_manager
+            storage_type = storage.get_storage_type()
+            
+            if storage_type != 'remote':
+                print(f"Storage type is currently set to: {storage_type}")
+                print()
+                print("FTP testing is only available when storage.type is set to 'remote'")
+                print()
+                print("To test FTP:")
+                print("  1. Edit config.yml (option 1 from config menu)")
+                print("  2. Set storage.type to 'remote'")
+                print("  3. Configure FTP settings under storage.remote")
+                print()
+                input("Press Enter to continue...")
+                return
+            
+            # Display current FTP config
+            remote_config = storage.config.get('storage', {}).get('remote', {})
+            print("Current FTP Configuration:")
+            print(f"  Hostname: {remote_config.get('hostname')}")
+            print(f"  Port: {remote_config.get('port', 21)}")
+            print(f"  Username: {remote_config.get('username')}")
+            print(f"  Directory: {remote_config.get('directory')}")
+            print()
+            
+            # Test connection
+            success, message = storage.test_ftp_connection()
+            
+            print()
+            if success:
+                print(f"✓ {message}")
+            else:
+                print(f"✗ {message}")
+                print()
+                print("Common issues:")
+                print("  - Incorrect hostname or port")
+                print("  - Invalid username or password")
+                print("  - Firewall blocking connection")
+                print("  - FTP server not running")
+            
+        except Exception as e:
+            print(f"✗ Error testing FTP: {e}")
+            traceback.print_exc()
+        
+        print()
+        input("Press Enter to continue...")
 
     def handle_config_menu(self):
         """Handle config menu navigation"""
@@ -118,6 +237,10 @@ class SipwiseBackupCLI:
             elif choice == "2":
                 self.restart_service()
             elif choice == "3":
+                self.test_send_email()
+            elif choice == "4":
+                self.test_ftp_connection()
+            elif choice == "5":
                 in_config_menu = False
             elif choice == "exit":
                 self.handle_exit()

@@ -56,6 +56,32 @@ reboot:
     time: "03:00"  # 24-hour format HH:MM
 
 # ----------------------------------------------------------
+# Email Notification Settings (SMTP)
+# ----------------------------------------------------------
+email:
+  enabled: false  # Enable/disable email notifications globally
+  
+  # SMTP Server Settings
+  smtp:
+    host: smtp.example.com
+    port: 587
+    username: notifications@example.com
+    password: changeme
+    use_tls: true   # true for TLS (port 587), false for SSL (port 465)
+    use_ssl: false  # true for SSL (port 465), false for TLS
+  
+  # Sender and Recipient
+  from_address: sipwise-backup@example.com
+  to_address: admin@example.com
+  
+  # Notification Settings - when to send emails
+  notifications:
+    backup_success: false   # Email on successful backup
+    backup_failure: true    # Email on failed backup
+    reboot_success: true    # Email on successful reboot initiation
+    reboot_failure: true    # Email on failed reboot
+
+# ----------------------------------------------------------
 # Sipwise Configuration Line Numbers
 # ----------------------------------------------------------
 # These line numbers reference specific settings in Sipwise config files

@@ -541,6 +541,57 @@ class StorageManager:
         except Exception as e:
             self.logger.error(f"Error deleting backup from FTP: {e}")
             return False
+    
+    def test_ftp_connection(self) -> Tuple[bool, str]:
+        """
+        Test FTP connection with current configuration
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            remote_config = self.config.get('storage', {}).get('remote', {})
+            hostname = remote_config.get('hostname')
+            port = remote_config.get('port', 21)
+            username = remote_config.get('username', '')
+            directory = remote_config.get('directory', '/backups/sipwise')
+            
+            if not hostname:
+                return False, "FTP hostname not configured in config.yml"
+            
+            print(f"Testing FTP connection to {hostname}:{port}...")
+            print(f"Username: {username}")
+            print(f"Directory: {directory}")
+            print()
+            
+            # Attempt connection
+            print("[1/4] Connecting to FTP server...")
+            ftp = self._ftp_connect()
+            print("      ✓ Connected successfully")
+            
+            # Test directory listing
+            print("[2/4] Testing directory listing...")
+            files = []
+            ftp.retrlines('LIST', files.append)
+            print(f"      ✓ Listed {len(files)} item(s) in directory")
+            
+            # Test permissions (try to get current directory)
+            print("[3/4] Verifying permissions...")
+            current_dir = ftp.pwd()
+            print(f"      ✓ Current directory: {current_dir}")
+            
+            # Disconnect
+            print("[4/4] Disconnecting...")
+            ftp.quit()
+            print("      ✓ Disconnected successfully")
+            
+            print()
+            return True, f"FTP connection test successful! Connected to {hostname}:{port}"
+            
+        except Exception as e:
+            error_msg = f"FTP connection test failed: {str(e)}"
+            print(f"\n✗ {error_msg}")
+            return False, error_msg
 
 
 # Convenience functions for external use

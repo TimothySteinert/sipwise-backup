@@ -17,6 +17,7 @@ from datetime import datetime
 # Import our storage module
 from storage import StorageManager
 from logger import get_logger
+from emailer import get_emailer
 
 
 class BackupManager:
@@ -174,23 +175,30 @@ class BackupManager:
         print("=" * 60)
         print("Starting Backup Process")
         print("=" * 60)
+        
+        emailer = get_emailer(self.config_path)
+        current_stage = "initialization"
 
         try:
             # Step 1: Create backup directory
+            current_stage = "initialization"
             backup_dir = self._create_backup_directory()
             print(f"[+] Working directory: {backup_dir}")
 
             # Step 2: Backup NGCP config
+            current_stage = "NGCP config backup"
             ngcp_success = self._backup_ngcp_config(backup_dir)
             if not ngcp_success:
                 print("Warning: NGCP config backup failed, continuing...")
 
             # Step 3: Dump MySQL database
+            current_stage = "MySQL database dump"
             mysql_success = self._dump_mysql_database(backup_dir)
             if not mysql_success:
                 raise Exception("MySQL dump failed - aborting backup")
 
             # Step 4: Generate backup name and zip
+            current_stage = "creating backup archive"
             backup_filename = self.storage.generate_backup_name(backup_type=backup_type)
             print(f"[+] Creating backup archive: {backup_filename}")
 
@@ -201,6 +209,7 @@ class BackupManager:
             print(f"    Backup size: {os.path.getsize(zip_path) / (1024*1024):.2f} MB")
 
             # Step 5: Save to storage
+            current_stage = "saving to storage"
             print(f"[+] Saving backup to {self.storage.get_storage_type()} storage...")
             save_success = self.storage.save_backup(zip_path)
 
@@ -229,6 +238,14 @@ class BackupManager:
                 self.storage.clean_tmp()
             except:
                 pass
+            
+            # Send failure email only for automatic backups
+            if backup_type == "auto":
+                self.logger.error(f"Backup failed at stage '{current_stage}': {e}")
+                emailer.send_backup_failure(
+                    error_message=str(e),
+                    stage=current_stage
+                )
 
             return None
 
