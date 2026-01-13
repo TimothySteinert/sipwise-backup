@@ -7,6 +7,13 @@ instance_type: master
 server_name: sipwise-server-01
 
 # ----------------------------------------------------------
+# MySQL Settings
+# ----------------------------------------------------------
+mysql:
+  user: root
+  password: changeme
+
+# ----------------------------------------------------------
 # Storage Settings
 # ----------------------------------------------------------
 storage:
@@ -24,10 +31,6 @@ storage:
 # Backup Settings (Master only)
 # ----------------------------------------------------------
 backup:
-  mysql:
-    user: root
-    password: changeme
-
   automatic:
     enabled: true
     frequency:

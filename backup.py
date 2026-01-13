@@ -63,8 +63,7 @@ class BackupManager:
         Returns:
             Dictionary with mysql_user and mysql_password
         """
-        backup_config = self.config.get('backup', {})
-        mysql_config = backup_config.get('mysql', {})
+        mysql_config = self.config.get('mysql', {})
 
         return {
             'user': mysql_config.get('user', 'root'),

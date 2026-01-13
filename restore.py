@@ -184,8 +184,20 @@ class RestoreManager:
         if not sql_file.exists():
             raise Exception("database.sql missing from backup!")
 
+        # Get MySQL credentials from config
+        mysql_config = self.config.get('mysql', {})
+        mysql_user = mysql_config.get('user', 'root')
+        mysql_password = mysql_config.get('password', '')
+
         print("[INFO] Restoring MySQL database...")
-        self._run_command(f"mysql < '{sql_file}'")
+
+        # Build mysql command with credentials
+        cmd = f"mysql -u {mysql_user}"
+        if mysql_password:
+            cmd += f" -p{mysql_password}"
+        cmd += f" < '{sql_file}'"
+
+        self._run_command(cmd)
         print("[OK] MySQL database restored")
 
     def apply_configuration(self):
