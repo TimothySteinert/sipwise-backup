@@ -69,6 +69,11 @@ echo "Creating log directory..."
 mkdir -p "$INSTALL_DIR/log"
 chmod 755 "$INSTALL_DIR/log"
 
+# Create state directory
+echo "Creating state directory..."
+mkdir -p "$INSTALL_DIR/state"
+chmod 755 "$INSTALL_DIR/state"
+
 # Set executable permissions
 echo "Setting file permissions..."
 chmod +x "$INSTALL_DIR/CLI/main.py"

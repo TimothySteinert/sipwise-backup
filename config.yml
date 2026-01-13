@@ -23,6 +23,8 @@ storage:
     directory: /opt/sipwise-backup/backups
 
   remote:
+    hostname: ftp.example.com
+    port: 21
     directory: /backups/sipwise
     username: backupuser
     password: changeme

@@ -5,6 +5,7 @@ Handles automatic backup scheduling, retention policy, and cleanup
 """
 
 import time
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict
@@ -16,6 +17,7 @@ import shutil
 from storage import StorageManager
 from backup import BackupManager
 from logger import get_logger
+
 
 
 class BackupScheduler:
@@ -35,7 +37,32 @@ class BackupScheduler:
         self.running = False
         self.last_reboot_month = None  # Track last reboot to prevent duplicates
         self.logger = get_logger(config_path)
+        self.state_dir = Path("/opt/sipwise-backup/state")
+        self.state_file = self.state_dir / "scheduler_state.json"
+        self._ensure_state_dir()
         self.logger.info("BackupScheduler initialized")
+
+    def _ensure_state_dir(self):
+        """Ensure the state directory exists"""
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def _load_state(self) -> dict:
+        """Load scheduler state from file"""
+        try:
+            if self.state_file.exists():
+                with open(self.state_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            self.logger.warn(f"Could not load state file: {e}")
+        return {}
+
+    def _save_state(self, state: dict):
+        """Save scheduler state to file"""
+        try:
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Could not save state file: {e}")
 
     def is_automatic_backup_enabled(self) -> bool:
         """
@@ -171,10 +198,12 @@ class BackupScheduler:
 
         Deletes automatic and unknown backups older than the configured retention days.
         Manual backups are exempt from retention policy.
+        Only applies to backups matching the current server name.
         """
         backup_config = self.config.get('backup', {})
         retention_config = backup_config.get('retention', {})
         retention_days = retention_config.get('days', 30)
+        current_server_name = self.config.get('server_name', 'unknown-server')
 
         self.logger.info(f"Applying retention policy (keep last {retention_days} days)")
         print(f"[+] Applying retention policy (keep last {retention_days} days)")
@@ -187,6 +216,19 @@ class BackupScheduler:
             print("    No backups to process")
             return
 
+        # Filter backups to only those matching current server name
+        matching_backups = [b for b in backups if b.get('server_name') == current_server_name]
+        other_server_count = len(backups) - len(matching_backups)
+        
+        if other_server_count > 0:
+            self.logger.debug(f"Skipping {other_server_count} backup(s) from other servers")
+            print(f"    Skipping {other_server_count} backup(s) from other servers")
+
+        if not matching_backups:
+            self.logger.debug("No backups matching current server name")
+            print("    No backups matching current server name")
+            return
+
         # Calculate cutoff date
         cutoff_date = datetime.now() - timedelta(days=retention_days)
         self.logger.debug(f"Cutoff date: {cutoff_date.strftime('%d/%m/%Y %H:%M')}")
@@ -195,7 +237,7 @@ class BackupScheduler:
         # Find backups to delete
         deleted_count = 0
         skipped_manual_count = 0
-        for backup in backups:
+        for backup in matching_backups:
             backup_date = backup['datetime']
             backup_type = backup.get('type', 'unknown')
             
@@ -234,11 +276,13 @@ class BackupScheduler:
         - Skips the current day (today) - all backups are preserved
         - For previous days: keeps only the last (most recent) backup
         - Deletes all other backups from previous days
+        - Only applies to backups matching the current server name
         """
         backup_config = self.config.get('backup', {})
         cleanup_config = backup_config.get('cleanup', {})
         cleanup_enabled = cleanup_config.get('enabled', False)
         cleanup_mode = cleanup_config.get('mode', 'last_per_day')
+        current_server_name = self.config.get('server_name', 'unknown-server')
 
         if not cleanup_enabled:
             self.logger.debug("Cleanup policy disabled, skipping")
@@ -261,10 +305,23 @@ class BackupScheduler:
             print("    No backups to process")
             return
 
+        # Filter backups to only those matching current server name
+        matching_backups = [b for b in backups if b.get('server_name') == current_server_name]
+        other_server_count = len(backups) - len(matching_backups)
+        
+        if other_server_count > 0:
+            self.logger.debug(f"Skipping {other_server_count} backup(s) from other servers")
+            print(f"    Skipping {other_server_count} backup(s) from other servers")
+
+        if not matching_backups:
+            self.logger.debug("No backups matching current server name")
+            print("    No backups matching current server name")
+            return
+
         # Filter out manual backups - they are exempt from cleanup
         auto_backups = []
         manual_count = 0
-        for backup in backups:
+        for backup in matching_backups:
             backup_type = backup.get('type', 'unknown')
             if backup_type == 'manual':
                 manual_count += 1
@@ -370,7 +427,15 @@ class BackupScheduler:
         print("=" * 80)
 
         self.running = True
-        last_backup_time = None
+        
+        # Load state from file
+        state = self._load_state()
+        last_backup_time = state.get('last_backup_time')  # Can be None or timestamp
+        self.last_reboot_month = state.get('last_reboot_month')
+        
+        if last_backup_time:
+            self.logger.info(f"Loaded last backup time from state: {datetime.fromtimestamp(last_backup_time)}")
+        
         last_config_check = time.time()
         config_check_interval = 300  # Check config every 5 minutes
 
@@ -427,6 +492,12 @@ class BackupScheduler:
                     # Run scheduled backup
                     self.run_scheduled_backup()
                     last_backup_time = current_time
+                    
+                    # Save state after backup
+                    self._save_state({
+                        'last_backup_time': last_backup_time,
+                        'last_reboot_month': self.last_reboot_month
+                    })
 
                     # Recalculate frequency in case config changed
                     frequency_seconds = self.get_backup_frequency_seconds()
@@ -443,6 +514,11 @@ class BackupScheduler:
                         if self.last_reboot_month != current_month_key:
                             # Update tracking before reboot to prevent race condition
                             self.last_reboot_month = current_month_key
+                            # Save state before reboot
+                            self._save_state({
+                                'last_backup_time': last_backup_time,
+                                'last_reboot_month': self.last_reboot_month
+                            })
                             self.perform_reboot()
 
                 # Sleep for a minute before checking again
