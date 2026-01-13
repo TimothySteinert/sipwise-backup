@@ -61,10 +61,9 @@ class EmailNotifier:
         
         # Get IPv4 address
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip_address = s.getsockname()[0]
-            s.close()
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                ip_address = s.getsockname()[0]
         except Exception:
             ip_address = "unknown"
         

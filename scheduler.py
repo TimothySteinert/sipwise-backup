@@ -180,9 +180,7 @@ class BackupScheduler:
         
         if not reboot_cmd:
             error_msg = "Reboot command not found on this system"
-            print(f"[ERROR] {error_msg}")
-            self.logger.error(error_msg)
-            self.emailer.send_reboot_failure(error_message=error_msg)
+            self._handle_reboot_error(error_msg)
             return
         
         # Use subprocess to run the reboot command
@@ -191,25 +189,19 @@ class BackupScheduler:
             # Send success email after reboot command executes successfully
             self.emailer.send_reboot_success()
         except subprocess.CalledProcessError as e:
-            error_msg = f"Reboot command failed: {e}"
-            print(f"[ERROR] {error_msg}")
-            self.logger.error(error_msg)
-            self.emailer.send_reboot_failure(error_message=str(e))
+            self._handle_reboot_error(f"Reboot command failed: {e}")
         except PermissionError:
-            error_msg = "Insufficient permissions to execute reboot command"
-            print(f"[ERROR] {error_msg}")
-            self.logger.error(error_msg)
-            self.emailer.send_reboot_failure(error_message=error_msg)
+            self._handle_reboot_error("Insufficient permissions to execute reboot command")
         except FileNotFoundError:
-            error_msg = "Reboot command not found"
-            print(f"[ERROR] {error_msg}")
-            self.logger.error(error_msg)
-            self.emailer.send_reboot_failure(error_message=error_msg)
+            self._handle_reboot_error("Reboot command not found")
         except Exception as e:
-            error_msg = f"Unexpected error during reboot: {e}"
-            print(f"[ERROR] {error_msg}")
-            self.logger.error(error_msg)
-            self.emailer.send_reboot_failure(error_message=str(e))
+            self._handle_reboot_error(f"Unexpected error during reboot: {e}")
+    
+    def _handle_reboot_error(self, error_msg: str):
+        """Helper method to handle reboot errors consistently"""
+        print(f"[ERROR] {error_msg}")
+        self.logger.error(error_msg)
+        self.emailer.send_reboot_failure(error_message=error_msg)
 
     def apply_retention_policy(self) -> int:
         """

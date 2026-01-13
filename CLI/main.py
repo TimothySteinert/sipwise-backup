@@ -115,8 +115,7 @@ class SipwiseBackupCLI:
         print()
         
         try:
-            # Import emailer module
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            # Import emailer module (path already configured at module level)
             from emailer import EmailNotifier
             
             # Create emailer instance
