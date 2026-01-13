@@ -1,0 +1,422 @@
+#!/usr/bin/env python3
+"""
+storage.py - Storage Module for sipwise-backup
+Handles all storage and filesystem operations including:
+- Reading/writing backup files
+- Zipping/unzipping operations
+- Local and FTP storage
+- Backup naming and listing
+"""
+
+import os
+import yaml
+import zipfile
+import shutil
+from datetime import datetime
+from ftplib import FTP
+from typing import List, Dict, Optional, Tuple
+
+
+class StorageManager:
+    """Manages all storage operations for sipwise-backup"""
+
+    def __init__(self, config_path: str = "/opt/sipwise-backup/config.yml"):
+        """
+        Initialize the StorageManager
+
+        Args:
+            config_path: Path to the configuration file
+        """
+        self.config_path = config_path
+        self.config = self._load_config()
+        self.tmp_dir = "/opt/sipwise-backup/tmp"
+        self._ensure_tmp_dir()
+
+    def _load_config(self) -> Dict:
+        """
+        Load configuration from config.yml
+
+        Returns:
+            Dictionary containing configuration data
+        """
+        try:
+            with open(self.config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            return config
+        except FileNotFoundError:
+            raise Exception(f"Configuration file not found: {self.config_path}")
+        except yaml.YAMLError as e:
+            raise Exception(f"Error parsing configuration file: {e}")
+
+    def _ensure_tmp_dir(self):
+        """Ensure the temporary directory exists"""
+        os.makedirs(self.tmp_dir, exist_ok=True)
+
+    def get_storage_type(self) -> str:
+        """
+        Get the configured storage type
+
+        Returns:
+            Storage type: 'local' or 'remote'
+        """
+        return self.config.get('storage', {}).get('type', 'local')
+
+    def get_storage_directory(self) -> str:
+        """
+        Get the configured storage directory based on storage type
+
+        Returns:
+            Storage directory path
+        """
+        storage_type = self.get_storage_type()
+        storage_config = self.config.get('storage', {})
+
+        if storage_type == 'local':
+            return storage_config.get('local', {}).get('directory', '/var/backups/sipwise')
+        else:  # remote
+            return storage_config.get('remote', {}).get('directory', '/backups/sipwise')
+
+    def generate_backup_name(self, extension: str = '.zip') -> str:
+        """
+        Generate a backup filename using the format:
+        server_name-instance_type-date(HH:MM/DD/MM/YYYY)
+
+        Args:
+            extension: File extension (default: .zip)
+
+        Returns:
+            Formatted backup filename
+        """
+        server_name = self.config.get('server_name', 'unknown-server')
+        instance_type = self.config.get('instance_type', 'unknown')
+
+        # Format: HH:MM/DD/MM/YYYY -> HH-MM_DD-MM-YYYY
+        now = datetime.now()
+        date_str = now.strftime("%H-%M_%d-%m-%Y")
+
+        return f"{server_name}-{instance_type}-{date_str}{extension}"
+
+    def parse_backup_name(self, filename: str) -> Optional[Dict]:
+        """
+        Parse a backup filename to extract metadata
+
+        Args:
+            filename: Backup filename to parse
+
+        Returns:
+            Dictionary with server_name, instance_type, and datetime, or None if invalid
+        """
+        try:
+            # Remove extension
+            name_without_ext = os.path.splitext(filename)[0]
+
+            # Split by hyphens
+            parts = name_without_ext.split('-')
+
+            if len(parts) < 5:
+                return None
+
+            # Reconstruct server name (may contain hyphens)
+            # Last 5 parts are: instance, HH, MM_DD, MM, YYYY
+            time_parts = parts[-5:]
+            server_name = '-'.join(parts[:-5])
+
+            instance_type = time_parts[0]
+            hour = time_parts[1]
+            minute_day = time_parts[2].split('_')
+            minute = minute_day[0]
+            day = minute_day[1] if len(minute_day) > 1 else time_parts[3]
+            month = time_parts[3] if len(minute_day) > 1 else time_parts[4]
+            year = time_parts[4] if len(minute_day) > 1 else parts[-1]
+
+            # Create datetime object
+            dt = datetime.strptime(f"{year}-{month}-{day} {hour}:{minute}", "%Y-%m-%d %H:%M")
+
+            return {
+                'server_name': server_name,
+                'instance_type': instance_type,
+                'datetime': dt,
+                'filename': filename
+            }
+        except Exception:
+            return None
+
+    def zip_directory(self, source_dir: str, output_filename: str) -> str:
+        """
+        Zip a directory into a backup file
+
+        Args:
+            source_dir: Directory to zip (typically tmp directory)
+            output_filename: Name for the output zip file
+
+        Returns:
+            Path to the created zip file
+        """
+        zip_path = os.path.join(self.tmp_dir, output_filename)
+
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(source_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, source_dir)
+                    zipf.write(file_path, arcname)
+
+        return zip_path
+
+    def unzip_backup(self, zip_path: str, destination_dir: Optional[str] = None) -> str:
+        """
+        Unzip a backup file
+
+        Args:
+            zip_path: Path to the zip file
+            destination_dir: Directory to extract to (default: tmp_dir)
+
+        Returns:
+            Path to the extracted directory
+        """
+        if destination_dir is None:
+            destination_dir = self.tmp_dir
+
+        extract_path = os.path.join(destination_dir, 'extracted')
+        os.makedirs(extract_path, exist_ok=True)
+
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            zipf.extractall(extract_path)
+
+        return extract_path
+
+    def save_backup_local(self, zip_path: str) -> bool:
+        """
+        Save a backup file to local storage
+
+        Args:
+            zip_path: Path to the zip file to save
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            storage_dir = self.get_storage_directory()
+            os.makedirs(storage_dir, exist_ok=True)
+
+            filename = os.path.basename(zip_path)
+            destination = os.path.join(storage_dir, filename)
+
+            shutil.copy2(zip_path, destination)
+            return True
+        except Exception as e:
+            print(f"Error saving backup locally: {e}")
+            return False
+
+    def save_backup_remote(self, zip_path: str) -> bool:
+        """
+        Save a backup file to remote FTP storage
+
+        Args:
+            zip_path: Path to the zip file to save
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            remote_config = self.config.get('storage', {}).get('remote', {})
+            username = remote_config.get('username', '')
+            password = remote_config.get('password', '')
+            directory = remote_config.get('directory', '/backups/sipwise')
+
+            # Note: FTP server hostname should be added to config
+            # For now, this is a placeholder
+            # ftp = FTP(hostname)
+            # ftp.login(username, password)
+            # ftp.cwd(directory)
+            #
+            # filename = os.path.basename(zip_path)
+            # with open(zip_path, 'rb') as f:
+            #     ftp.storbinary(f'STOR {filename}', f)
+            #
+            # ftp.quit()
+
+            print("Remote FTP storage not fully implemented yet")
+            return False
+        except Exception as e:
+            print(f"Error saving backup to FTP: {e}")
+            return False
+
+    def save_backup(self, zip_path: str) -> bool:
+        """
+        Save a backup file to configured storage location
+
+        Args:
+            zip_path: Path to the zip file to save
+
+        Returns:
+            True if successful, False otherwise
+        """
+        storage_type = self.get_storage_type()
+
+        if storage_type == 'local':
+            return self.save_backup_local(zip_path)
+        else:  # remote
+            return self.save_backup_remote(zip_path)
+
+    def list_backups(self) -> List[Dict]:
+        """
+        List all available backups from storage
+
+        Returns:
+            List of dictionaries containing backup metadata
+        """
+        storage_type = self.get_storage_type()
+
+        if storage_type == 'local':
+            return self._list_backups_local()
+        else:  # remote
+            return self._list_backups_remote()
+
+    def _list_backups_local(self) -> List[Dict]:
+        """
+        List backups from local storage
+
+        Returns:
+            List of backup metadata dictionaries
+        """
+        backups = []
+        storage_dir = self.get_storage_directory()
+
+        if not os.path.exists(storage_dir):
+            return backups
+
+        for filename in os.listdir(storage_dir):
+            if filename.endswith('.zip'):
+                metadata = self.parse_backup_name(filename)
+                if metadata:
+                    file_path = os.path.join(storage_dir, filename)
+                    metadata['path'] = file_path
+                    metadata['size'] = os.path.getsize(file_path)
+                    backups.append(metadata)
+
+        # Sort by datetime, newest first
+        backups.sort(key=lambda x: x['datetime'], reverse=True)
+        return backups
+
+    def _list_backups_remote(self) -> List[Dict]:
+        """
+        List backups from remote FTP storage
+
+        Returns:
+            List of backup metadata dictionaries
+        """
+        # Placeholder for FTP implementation
+        print("Remote FTP listing not fully implemented yet")
+        return []
+
+    def get_backup_by_name(self, filename: str) -> Optional[str]:
+        """
+        Get the full path to a backup file by filename
+
+        Args:
+            filename: Name of the backup file
+
+        Returns:
+            Full path to the backup file, or None if not found
+        """
+        storage_type = self.get_storage_type()
+        storage_dir = self.get_storage_directory()
+
+        if storage_type == 'local':
+            file_path = os.path.join(storage_dir, filename)
+            if os.path.exists(file_path):
+                return file_path
+
+        return None
+
+    def download_backup_to_tmp(self, filename: str) -> Optional[str]:
+        """
+        Download/copy a backup to the tmp directory
+
+        Args:
+            filename: Name of the backup file
+
+        Returns:
+            Path to the backup in tmp directory, or None if failed
+        """
+        storage_type = self.get_storage_type()
+
+        if storage_type == 'local':
+            source = self.get_backup_by_name(filename)
+            if source:
+                destination = os.path.join(self.tmp_dir, filename)
+                shutil.copy2(source, destination)
+                return destination
+        else:
+            # Placeholder for FTP download
+            print("Remote FTP download not fully implemented yet")
+            return None
+
+        return None
+
+    def clean_tmp(self):
+        """Remove all files from the tmp directory"""
+        if os.path.exists(self.tmp_dir):
+            shutil.rmtree(self.tmp_dir)
+            self._ensure_tmp_dir()
+
+    def get_last_backup_time(self) -> Optional[datetime]:
+        """
+        Get the timestamp of the most recent backup
+
+        Returns:
+            Datetime of the last backup, or None if no backups exist
+        """
+        backups = self.list_backups()
+        if backups:
+            return backups[0]['datetime']
+        return None
+
+    def delete_backup(self, filename: str) -> bool:
+        """
+        Delete a backup file from storage
+
+        Args:
+            filename: Name of the backup file to delete
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            storage_type = self.get_storage_type()
+
+            if storage_type == 'local':
+                file_path = self.get_backup_by_name(filename)
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                    return True
+            else:
+                # Placeholder for FTP deletion
+                print("Remote FTP deletion not fully implemented yet")
+                return False
+
+            return False
+        except Exception as e:
+            print(f"Error deleting backup: {e}")
+            return False
+
+
+# Convenience functions for external use
+def get_storage_manager() -> StorageManager:
+    """
+    Get a StorageManager instance
+
+    Returns:
+        StorageManager instance
+    """
+    return StorageManager()
+
+
+if __name__ == "__main__":
+    # Test the storage manager
+    sm = StorageManager()
+    print(f"Storage type: {sm.get_storage_type()}")
+    print(f"Storage directory: {sm.get_storage_directory()}")
+    print(f"Sample backup name: {sm.generate_backup_name()}")
+    print(f"Tmp directory: {sm.tmp_dir}")

@@ -1,0 +1,2 @@
+# Python dependencies for sipwise-backup
+PyYAML>=5.1

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # uninstall.sh - Uninstallation script for sipwise-backup
-# This script removes sipwise-backup from /usr/local/bin
+# This script removes sipwise-backup Python CLI application
 
 set -e
 
@@ -11,8 +11,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Installation directory
-INSTALL_DIR="/usr/local/bin"
+# Installation directories
+INSTALL_DIR="/opt/sipwise-backup"
+INSTALL_BIN_DIR="/usr/bin"
+SERVICE_DIR="/etc/systemd/system"
 APP_NAME="sipwise-backup"
 
 echo "======================================"
@@ -27,18 +29,37 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Check if the application is installed
-if [ ! -f "$INSTALL_DIR/$APP_NAME" ]; then
-    echo -e "${YELLOW}Warning: $APP_NAME is not installed in $INSTALL_DIR${NC}"
-    echo "Nothing to uninstall."
-    exit 0
+# Stop and disable the service if it's running
+if systemctl is-active --quiet "$APP_NAME.service"; then
+    echo "Stopping $APP_NAME service..."
+    systemctl stop "$APP_NAME.service"
 fi
 
-echo "Removing $APP_NAME from $INSTALL_DIR..."
+if systemctl is-enabled --quiet "$APP_NAME.service" 2>/dev/null; then
+    echo "Disabling $APP_NAME service..."
+    systemctl disable "$APP_NAME.service"
+fi
 
-# Remove the script
-rm -f "$INSTALL_DIR/$APP_NAME"
+# Remove systemd service file
+if [ -f "$SERVICE_DIR/$APP_NAME.service" ]; then
+    echo "Removing systemd service..."
+    rm -f "$SERVICE_DIR/$APP_NAME.service"
+    systemctl daemon-reload
+fi
 
+# Remove wrapper script
+if [ -f "$INSTALL_BIN_DIR/$APP_NAME" ]; then
+    echo "Removing wrapper script..."
+    rm -f "$INSTALL_BIN_DIR/$APP_NAME"
+fi
+
+# Remove application directory
+if [ -d "$INSTALL_DIR" ]; then
+    echo "Removing application files..."
+    rm -rf "$INSTALL_DIR"
+fi
+
+echo ""
 echo -e "${GREEN}✓ Uninstallation completed successfully!${NC}"
 echo ""
 echo "$APP_NAME has been removed from your system."
