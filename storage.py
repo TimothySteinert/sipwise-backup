@@ -114,42 +114,34 @@ class StorageManager:
             # Split by hyphens
             parts = name_without_ext.split('-')
 
-            if len(parts) < 5:
+            # Minimum parts needed:
+            # Old format: server-instance-HH-MM_DD-MM-YYYY = at least 6 parts (with single-word server)
+            # New format: server-instance-auto-HH-MM_DD-MM-YYYY = at least 7 parts
+            if len(parts) < 6:
                 return None
 
             # Try to detect if backup_type is present (auto/manual)
-            # New format: server-instance-type-HH-MM_DD-MM-YYYY (7+ parts)
-            # Old format: server-instance-HH-MM_DD-MM-YYYY (6+ parts)
+            # New format: server-instance-auto/manual-HH-MM_DD-MM-YYYY
+            # Old format: server-instance-HH-MM_DD-MM-YYYY
+            # Time is always the last 4 parts: HH, MM_DD, MM, YYYY
             
             backup_type = "unknown"
             
-            # Check if the third-to-last or later part before time is 'auto' or 'manual'
-            # New format has: ... instance-type-HH-MM_DD-MM-YYYY
-            # Old format has: ... instance-HH-MM_DD-MM-YYYY
-            
-            # Look for backup type by checking if any part is 'auto' or 'manual'
-            if len(parts) >= 6:
-                # Try new format first: check if part before time parts is auto/manual
-                # Last 5 parts in new format: backup_type, HH, MM_DD, MM, YYYY
-                if parts[-5] in ['auto', 'manual']:
-                    backup_type = parts[-5]
-                    time_parts = parts[-4:]  # HH, MM_DD, MM, YYYY
-                    server_instance_parts = parts[:-5]  # server-instance
-                    
-                    # Last of server_instance_parts is instance_type
-                    instance_type = server_instance_parts[-1]
-                    server_name = '-'.join(server_instance_parts[:-1])
-                else:
-                    # Old format: instance, HH, MM_DD, MM, YYYY
-                    time_parts = parts[-4:]
-                    server_instance_parts = parts[:-4]
-                    
-                    instance_type = server_instance_parts[-1]
-                    server_name = '-'.join(server_instance_parts[:-1])
+            # Check if the 5th part from the end is 'auto' or 'manual'
+            # (parts[-5] would be the backup type in new format)
+            if len(parts) >= 7 and parts[-5] in ['auto', 'manual']:
+                # New format with backup type
+                backup_type = parts[-5]
+                time_parts = parts[-4:]  # HH, MM_DD, MM, YYYY
+                server_instance_parts = parts[:-5]  # everything before backup_type
+                
+                # Last of server_instance_parts is instance_type
+                instance_type = server_instance_parts[-1] if server_instance_parts else 'unknown'
+                server_name = '-'.join(server_instance_parts[:-1]) if len(server_instance_parts) > 1 else 'unknown'
             else:
-                # Fallback for old format with minimum parts
-                time_parts = parts[-4:]
-                server_instance_parts = parts[:-4]
+                # Old format without backup type
+                time_parts = parts[-4:]  # HH, MM_DD, MM, YYYY
+                server_instance_parts = parts[:-4]  # everything before time
                 
                 instance_type = server_instance_parts[-1] if server_instance_parts else 'unknown'
                 server_name = '-'.join(server_instance_parts[:-1]) if len(server_instance_parts) > 1 else 'unknown'
