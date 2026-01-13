@@ -105,7 +105,11 @@ class BackupScheduler:
             return False
         
         # Parse scheduled time with validation
-        scheduled_time = schedule['time']
+        scheduled_time = schedule.get('time')
+        if not scheduled_time:
+            print("[ERROR] Reboot time not configured")
+            return False
+            
         try:
             scheduled_hour, scheduled_minute = map(int, scheduled_time.split(':'))
             if not (0 <= scheduled_hour <= 23 and 0 <= scheduled_minute <= 59):
