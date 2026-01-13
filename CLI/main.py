@@ -27,10 +27,18 @@ class SipwiseBackupCLI:
         self.running = True
         self.install_dir = "/opt/sipwise-backup"
         self.config_file = os.path.join(self.install_dir, "config.yml")
+        self._storage_manager = None  # Lazy-loaded storage manager cache
 
     def clear_screen(self):
         """Clear the terminal screen"""
         os.system('clear')
+
+    @property
+    def storage_manager(self):
+        """Lazy-loaded storage manager instance"""
+        if self._storage_manager is None:
+            self._storage_manager = StorageManager(self.config_file)
+        return self._storage_manager
 
     def show_banner(self):
         """Display application banner"""
@@ -160,7 +168,7 @@ class SipwiseBackupCLI:
     def handle_list_backups(self):
         """Handle list backups menu"""
         try:
-            storage = StorageManager(self.config_file)
+            storage = self.storage_manager
             backups = storage.list_backups()
             page_size = 15
             current_page = 0
@@ -247,7 +255,7 @@ class SipwiseBackupCLI:
     def handle_restore_backup(self):
         """Handle restore backup menu"""
         try:
-            storage = StorageManager(self.config_file)
+            storage = self.storage_manager
             backups = storage.list_backups()
 
             in_restore_menu = True
@@ -312,75 +320,191 @@ class SipwiseBackupCLI:
         self.show_banner()
 
     def handle_restore_confirmation(self, backup):
-        """Handle restore confirmation process"""
+        """Handle restore confirmation process with different flows for same/different server"""
         self.clear_screen()
         self.show_banner()
-
+        
         backup_name = backup['filename']
-        print("=" * 80)
-        print("Restore Confirmation")
-        print("=" * 80)
-        print()
-        print(f"Backup: {backup_name}")
-        print(f"Server: {backup['server_name']}")
-        print(f"Type: {backup['instance_type']}")
-        print(f"Date: {backup['datetime'].strftime('%d/%m/%Y %H:%M')}")
-        print()
+        backup_server = backup['server_name']
+        backup_type = backup['instance_type']
+        backup_date = backup['datetime'].strftime('%d/%m/%Y %H:%M')
+        
+        # Get current server info using cached storage manager
+        current_server = self.storage_manager.config.get('server_name', '')
+        current_type = self.storage_manager.config.get('instance_type', '')
+        
+        # Check if same server
+        is_same_server = (backup_server == current_server and backup_type == current_type)
+        
+        if is_same_server:
+            # SAME SERVER RESTORE FLOW
+            self._handle_same_server_restore(backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type)
+        else:
+            # DIFFERENT SERVER RESTORE FLOW (DR scenario)
+            self._handle_different_server_restore(backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type)
 
-        # Step 1: Confirm restore
-        print("Restore this backup? (Y/N): ", end="")
+    def _handle_same_server_restore(self, backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type):
+        """Handle restore to the same server"""
+        print("=" * 80)
+        print("Restore Summary - Same Server")
+        print("=" * 80)
+        print()
+        print(f"Restoring from: {backup_server} ({backup_type}) - {backup_date}")
+        print(f"Restoring to:   {current_server} ({current_type})")
+        print()
+        print("!" * 80)
+        print("WARNING: This will reboot services and stop any in-progress calls!")
+        print("!" * 80)
+        print()
+        print("Proceed with restore? (Y/N): ", end="")
         confirm = input().strip().upper()
-
+        
         if confirm != "Y":
             print("\nRestore cancelled.")
             input("\nPress Enter to continue...")
             return
+        
+        # Execute restore - same server means:
+        # - No SQL key prompt (restore entire constants.yml)
+        # - No firewall prompt
+        # - No DR warning
+        self._execute_restore(
+            backup_name,
+            preserve_sql_key=False,  # Restore entire constants.yml since same server
+            disable_firewall=False,
+            restore_sip_register=True
+        )
 
-        # Step 2: Preserve SQL encryption key
-        print("\nPreserve current SQL encryption key? (Y/N): ", end="")
-        preserve_key = input().strip().upper()
-        preserve_sql_key = (preserve_key == "Y")
-
-        # Step 3: Restore SIP register data with warning
-        print("\n" + "!" * 80)
-        print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
-        print("Ensure no other instances are running before continuing.")
+    def _handle_different_server_restore(self, backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type):
+        """Handle restore to a different server (DR scenario)"""
+        
+        # Step 1: SQL Encryption Key Warning
+        print("=" * 80)
+        print("SQL Encryption Key")
+        print("=" * 80)
+        print()
         print("!" * 80)
-        print("\nPress N to return to menu or Y to continue: ", end="")
-        sip_register = input().strip().upper()
-
-        if sip_register != "Y":
+        print("WARNING: When restoring to a DR server, you MUST retain the")
+        print("original SQL encryption key to access encrypted database fields!")
+        print("!" * 80)
+        print()
+        print("Preserve current SQL encryption key? (Y/N)")
+        print("(Recommended: Y for DR restore)")
+        print()
+        print("Choice: ", end="")
+        preserve_key = input().strip().upper()
+        
+        if preserve_key != "Y":
+            print("\n" + "!" * 80)
+            print("Are you SURE you want to use the SQL key from the backup?")
+            print("This may cause data access issues on a DR server!")
+            print("!" * 80)
+            print("\nContinue without preserving key? (Y/N): ", end="")
+            confirm = input().strip().upper()
+            if confirm != "Y":
+                print("\nRestore cancelled.")
+                input("\nPress Enter to continue...")
+                return
+        
+        preserve_sql_key = (preserve_key == "Y")
+        
+        # Step 2: Firewall Rules
+        self.clear_screen()
+        self.show_banner()
+        print("=" * 80)
+        print("Firewall Configuration")
+        print("=" * 80)
+        print()
+        print("Do you want to deactivate firewall rules?")
+        print()
+        print("!" * 80)
+        print("WARNING: Changing the server IP may result in the web UI")
+        print("becoming inaccessible if firewall rules block the new IP.")
+        print("!" * 80)
+        print()
+        print("Recommended: Y (disable firewall, then manually verify and re-enable)")
+        print()
+        print("Deactivate firewall? (Y/N): ", end="")
+        firewall_choice = input().strip().upper()
+        disable_firewall = (firewall_choice == "Y")
+        
+        # Step 3: Final Summary and DR Warning
+        self.clear_screen()
+        self.show_banner()
+        
+        # Get system IP using public static method
+        system_ip = RestoreManager.get_system_ipv4_static()
+        
+        print("=" * 80)
+        print("Restore Summary - DR Server")
+        print("=" * 80)
+        print()
+        print(f"Restoring from: {backup_server} ({backup_type}) - {backup_date}")
+        print(f"Restoring to:   {current_server} ({current_type})")
+        print()
+        print(f"SQL Key:        {'Preserve current' if preserve_sql_key else 'Use from backup'}")
+        print(f"Firewall:       {'Disable' if disable_firewall else 'Keep enabled'}")
+        print()
+        print("!" * 80)
+        print("CRITICAL DR WARNING")
+        print("!" * 80)
+        print()
+        print("This restore will register to peers after completion.")
+        print("The MASTER server must be OFFLINE before proceeding!")
+        print()
+        print("DO NOT PROCEED IF THIS IS NOT A DR SITUATION!")
+        print()
+        print("Once completed, only a SINGLE instance (either DR or Master)")
+        print("can be active at any time.")
+        print()
+        print(f"Update DNS records to point to: {system_ip}")
+        print("to allow subscribers to connect to the DR server.")
+        print()
+        print("!" * 80)
+        print()
+        print("Proceed with DR restore? (Y/N): ", end="")
+        confirm = input().strip().upper()
+        
+        if confirm != "Y":
             print("\nRestore cancelled.")
             input("\nPress Enter to continue...")
             return
-
-        restore_sip_register = True
-
+        
         # Execute restore
+        self._execute_restore(
+            backup_name,
+            preserve_sql_key=preserve_sql_key,
+            disable_firewall=disable_firewall,
+            restore_sip_register=True
+        )
+
+    def _execute_restore(self, backup_name, preserve_sql_key, disable_firewall, restore_sip_register):
+        """Execute the actual restore operation"""
         print()
         print("=" * 80)
         print("Starting restore operation...")
         print("=" * 80)
         print()
-
+        
         try:
             restore_manager = RestoreManager(self.config_file)
             success = restore_manager.run_restore(
                 backup_name,
                 preserve_sql_key=preserve_sql_key,
-                restore_sip_register=restore_sip_register
+                restore_sip_register=restore_sip_register,
+                disable_firewall=disable_firewall
             )
-
+            
             print()
             if success:
                 print("✓ Restore completed successfully!")
             else:
                 print("✗ Restore failed. Check the output above for errors.")
-
+        
         except Exception as e:
             print()
             print(f"✗ Error during restore: {e}")
-
+        
         print()
         print("Press Enter to return to main menu...")
         input()
