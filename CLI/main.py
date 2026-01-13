@@ -8,6 +8,7 @@ Version: 1.0.0
 import sys
 import os
 import subprocess
+import traceback
 
 # Add parent directory to path to import backup module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -162,7 +163,6 @@ class SipwiseBackupCLI:
             
         except Exception as e:
             print(f"✗ Error testing email: {e}")
-            import traceback
             traceback.print_exc()
         
         print()
@@ -219,7 +219,6 @@ class SipwiseBackupCLI:
             
         except Exception as e:
             print(f"✗ Error testing FTP: {e}")
-            import traceback
             traceback.print_exc()
         
         print()

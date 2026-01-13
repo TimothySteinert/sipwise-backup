@@ -187,9 +187,9 @@ class BackupScheduler:
         
         # Use subprocess to run the reboot command
         try:
-            # Send success email before reboot
-            self.emailer.send_reboot_success()
             subprocess.run([reboot_cmd], check=True)
+            # Send success email after reboot command executes successfully
+            self.emailer.send_reboot_success()
         except subprocess.CalledProcessError as e:
             error_msg = f"Reboot command failed: {e}"
             print(f"[ERROR] {error_msg}")

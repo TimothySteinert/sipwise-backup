@@ -175,10 +175,11 @@ IP Address: {server['ip']}
             return False
         
         subject = self._build_subject("Backup", "SUCCESS")
+        server_info = self.get_server_info()
         
         body = f"""BACKUP SUCCESSFUL
 
-Server: {self.get_server_info()['name']} ({self.get_server_info()['type']})
+Server: {server_info['name']} ({server_info['type']})
 Date/Time: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 Backup Details:
@@ -211,10 +212,11 @@ Backup Details:
             return False
         
         subject = self._build_subject("Backup", "FAILURE")
+        server_info = self.get_server_info()
         
         body = f"""BACKUP FAILED
 
-Server: {self.get_server_info()['name']} ({self.get_server_info()['type']})
+Server: {server_info['name']} ({server_info['type']})
 Date/Time: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 Error Details:
@@ -241,10 +243,11 @@ Recommended Actions:
             return False
         
         subject = self._build_subject("Scheduled Reboot", "INITIATED")
+        server_info = self.get_server_info()
         
         body = f"""SCHEDULED REBOOT INITIATED
 
-Server: {self.get_server_info()['name']} ({self.get_server_info()['type']})
+Server: {server_info['name']} ({server_info['type']})
 Date/Time: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 The scheduled system reboot has been initiated.
@@ -269,10 +272,11 @@ please check the system manually.
             return False
         
         subject = self._build_subject("Scheduled Reboot", "FAILURE")
+        server_info = self.get_server_info()
         
         body = f"""SCHEDULED REBOOT FAILED
 
-Server: {self.get_server_info()['name']} ({self.get_server_info()['type']})
+Server: {server_info['name']} ({server_info['type']})
 Date/Time: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 Error Details:
@@ -304,21 +308,24 @@ Recommended Actions:
             return False
         
         subject = self._build_subject("Email Test", "SUCCESS")
+        server_info = self.get_server_info()
+        email_config = self.config.get('email', {})
+        smtp_config = email_config.get('smtp', {})
         
         body = f"""EMAIL TEST SUCCESSFUL
 
 This is a test email from sipwise-backup to verify your SMTP configuration.
 
-Server: {self.get_server_info()['name']} ({self.get_server_info()['type']})
+Server: {server_info['name']} ({server_info['type']})
 Date/Time: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
 
 SMTP Configuration:
-- Host: {self.config.get('email', {}).get('smtp', {}).get('host')}
-- Port: {self.config.get('email', {}).get('smtp', {}).get('port')}
-- TLS: {self.config.get('email', {}).get('smtp', {}).get('use_tls')}
-- SSL: {self.config.get('email', {}).get('smtp', {}).get('use_ssl')}
+- Host: {smtp_config.get('host')}
+- Port: {smtp_config.get('port')}
+- TLS: {smtp_config.get('use_tls')}
+- SSL: {smtp_config.get('use_ssl')}
 
-Recipient: {self.config.get('email', {}).get('to_address')}
+Recipient: {email_config.get('to_address')}
 
 If you received this email, your SMTP configuration is working correctly!
 """
