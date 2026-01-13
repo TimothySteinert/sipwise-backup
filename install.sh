@@ -64,6 +64,11 @@ mkdir -p "$INSTALL_DIR"
 echo "Extracting $ZIP_FILE to $INSTALL_DIR..."
 python3 -c "import zipfile; zipfile.ZipFile('./$ZIP_FILE').extractall('$INSTALL_DIR')"
 
+# Create log directory
+echo "Creating log directory..."
+mkdir -p "$INSTALL_DIR/log"
+chmod 755 "$INSTALL_DIR/log"
+
 # Set executable permissions
 echo "Setting file permissions..."
 chmod +x "$INSTALL_DIR/CLI/main.py"

@@ -16,6 +16,8 @@ from datetime import datetime
 from ftplib import FTP
 from typing import List, Dict, Optional, Tuple
 
+from logger import get_logger
+
 
 class StorageManager:
     """Manages all storage operations for sipwise-backup"""
@@ -31,6 +33,7 @@ class StorageManager:
         self.config = self._load_config()
         self.tmp_dir = "/opt/sipwise-backup/tmp"
         self._ensure_tmp_dir()
+        self.logger = get_logger(config_path)
 
     def _load_config(self) -> Dict:
         """
@@ -279,11 +282,23 @@ class StorageManager:
             True if successful, False otherwise
         """
         storage_type = self.get_storage_type()
+        
+        self.logger.debug(f"Saving backup: {os.path.basename(zip_path)}")
 
         if storage_type == 'local':
-            return self.save_backup_local(zip_path)
+            result = self.save_backup_local(zip_path)
+            if result:
+                self.logger.success(f"Backup saved to {self.get_storage_directory()}")
+            else:
+                self.logger.error(f"Failed to save backup to local storage")
+            return result
         else:  # remote
-            return self.save_backup_remote(zip_path)
+            result = self.save_backup_remote(zip_path)
+            if result:
+                self.logger.success(f"Backup saved to remote storage")
+            else:
+                self.logger.error(f"Failed to save backup to remote storage")
+            return result
 
     def list_backups(self) -> List[Dict]:
         """
@@ -416,14 +431,17 @@ class StorageManager:
                 file_path = self.get_backup_by_name(filename)
                 if file_path and os.path.exists(file_path):
                     os.remove(file_path)
+                    self.logger.debug(f"Deleted backup: {filename}")
                     return True
             else:
                 # Placeholder for FTP deletion
+                self.logger.warn("Remote FTP deletion not fully implemented yet")
                 print("Remote FTP deletion not fully implemented yet")
                 return False
 
             return False
         except Exception as e:
+            self.logger.error(f"Failed to delete backup: {e}")
             print(f"Error deleting backup: {e}")
             return False
 

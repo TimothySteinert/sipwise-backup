@@ -20,6 +20,7 @@ import sys
 
 # Import our storage module
 from storage import StorageManager
+from logger import get_logger
 
 
 class RestoreManager:
@@ -32,12 +33,14 @@ class RestoreManager:
         Args:
             config_path: Path to the configuration file
         """
+        self.config_path = config_path
         self.storage = StorageManager(config_path)
         self.config = self.storage.config
         self.tmp_dir = Path(self.storage.tmp_dir)
         self.ngcp_config_dir = Path("/etc/ngcp-config")
         self.source_constants = self.ngcp_config_dir / "constants.yml"
         self.tempkey_path = self.tmp_dir / "tempkey"
+        self.logger = get_logger(config_path)
         
         # Get Sipwise config line numbers from config (with defaults for backward compatibility)
         sipwise_config = self.config.get('sipwise', {})
@@ -148,6 +151,7 @@ class RestoreManager:
         if not config_file.exists():
             raise Exception("config.yml missing from backup ngcp-config!")
         
+        self.logger.warn("Disabling firewall in configuration")
         print(f"[INFO] Disabling firewall in config.yml (line {self.firewall_enable_line})...")
         
         with config_file.open("r") as f:
@@ -270,6 +274,7 @@ class RestoreManager:
         if not extracted_ngcp.exists():
             raise Exception("Backup missing ngcp-config/")
 
+        self.logger.debug("Restoring NGCP configuration")
         print("[INFO] Restoring ngcp-config...")
 
         for item in extracted_ngcp.iterdir():
@@ -311,6 +316,7 @@ class RestoreManager:
         mysql_user = mysql_config.get('user', 'root')
         mysql_password = mysql_config.get('password', '')
 
+        self.logger.debug("Restoring MySQL database")
         print("[INFO] Restoring MySQL database...")
 
         # Build mysql command with credentials
@@ -320,6 +326,7 @@ class RestoreManager:
         cmd += f" < '{sql_file}'"
 
         self._run_command(cmd)
+        self.logger.success("MySQL database restored successfully")
         print("[OK] MySQL database restored")
 
     def apply_configuration(self):
@@ -352,6 +359,7 @@ class RestoreManager:
         Returns:
             True if successful, False otherwise
         """
+        self.logger.info(f"Starting restore from backup: {backup_filename}")
         print("=" * 80)
         print("Starting Restore Process")
         print("=" * 80)

@@ -15,6 +15,7 @@ import shutil
 # Import our modules
 from storage import StorageManager
 from backup import BackupManager
+from logger import get_logger
 
 
 class BackupScheduler:
@@ -27,11 +28,14 @@ class BackupScheduler:
         Args:
             config_path: Path to the configuration file
         """
+        self.config_path = config_path
         self.storage = StorageManager(config_path)
         self.backup_manager = BackupManager(config_path)
         self.config = self.storage.config
         self.running = False
         self.last_reboot_month = None  # Track last reboot to prevent duplicates
+        self.logger = get_logger(config_path)
+        self.logger.info("BackupScheduler initialized")
 
     def is_automatic_backup_enabled(self) -> bool:
         """
@@ -129,6 +133,7 @@ class BackupScheduler:
         """
         Perform the system reboot
         """
+        self.logger.warn("System reboot initiated by scheduler")
         print("\n" + "=" * 80)
         print(f"SCHEDULED REBOOT - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         print("=" * 80)
@@ -171,17 +176,20 @@ class BackupScheduler:
         retention_config = backup_config.get('retention', {})
         retention_days = retention_config.get('days', 30)
 
+        self.logger.info(f"Applying retention policy (keep last {retention_days} days)")
         print(f"[+] Applying retention policy (keep last {retention_days} days)")
 
         # Get all backups
         backups = self.storage.list_backups()
 
         if not backups:
+            self.logger.debug("No backups to process")
             print("    No backups to process")
             return
 
         # Calculate cutoff date
         cutoff_date = datetime.now() - timedelta(days=retention_days)
+        self.logger.debug(f"Cutoff date: {cutoff_date.strftime('%d/%m/%Y %H:%M')}")
         print(f"    Cutoff date: {cutoff_date.strftime('%d/%m/%Y %H:%M')}")
 
         # Find backups to delete
@@ -198,16 +206,23 @@ class BackupScheduler:
             
             if backup_date < cutoff_date:
                 filename = backup['filename']
+                self.logger.debug(f"Deleting old backup: {filename}")
                 print(f"    Deleting old backup: {filename}")
                 if self.storage.delete_backup(filename):
                     deleted_count += 1
 
         if skipped_manual_count > 0:
+            self.logger.debug(f"Skipped {skipped_manual_count} manual backup(s) (exempt from retention)")
             print(f"    Skipped {skipped_manual_count} manual backup(s) (exempt from retention)")
         if deleted_count > 0:
+            self.logger.info(f"Deleted {deleted_count} old backup(s)")
             print(f"    Deleted {deleted_count} old backup(s)")
         else:
+            self.logger.debug("No old backups to delete")
             print("    No old backups to delete")
+        
+        # Also apply retention to log files
+        self.logger.apply_retention_policy()
 
     def apply_cleanup_policy(self):
         """
@@ -226,19 +241,23 @@ class BackupScheduler:
         cleanup_mode = cleanup_config.get('mode', 'last_per_day')
 
         if not cleanup_enabled:
+            self.logger.debug("Cleanup policy disabled, skipping")
             print("[+] Cleanup policy disabled, skipping")
             return
 
         if cleanup_mode != 'last_per_day':
+            self.logger.warn(f"Unknown cleanup mode: {cleanup_mode}, skipping")
             print(f"[+] Unknown cleanup mode: {cleanup_mode}, skipping")
             return
 
+        self.logger.info("Applying cleanup policy (last per day)")
         print("[+] Applying cleanup policy (last per day)")
 
         # Get all backups
         backups = self.storage.list_backups()
 
         if not backups:
+            self.logger.debug("No backups to process")
             print("    No backups to process")
             return
 
@@ -253,9 +272,11 @@ class BackupScheduler:
                 auto_backups.append(backup)
 
         if manual_count > 0:
+            self.logger.debug(f"Excluding {manual_count} manual backup(s) from cleanup")
             print(f"    Excluding {manual_count} manual backup(s) from cleanup")
 
         if not auto_backups:
+            self.logger.debug("No automatic backups to process")
             print("    No automatic backups to process")
             return
 
@@ -291,19 +312,23 @@ class BackupScheduler:
 
             for backup in backups_to_delete:
                 filename = backup['filename']
+                self.logger.debug(f"Deleting duplicate backup for {day_key}: {filename}")
                 print(f"    Deleting duplicate backup for {day_key}: {filename}")
                 if self.storage.delete_backup(filename):
                     deleted_count += 1
 
         if deleted_count > 0:
+            self.logger.info(f"Deleted {deleted_count} duplicate backup(s)")
             print(f"    Deleted {deleted_count} duplicate backup(s)")
         else:
+            self.logger.debug("No duplicate backups to delete")
             print("    No duplicate backups to delete")
 
     def run_scheduled_backup(self):
         """
         Run a scheduled backup and apply retention/cleanup policies
         """
+        self.logger.info("Starting scheduled backup")
         print("\n" + "=" * 80)
         print(f"SCHEDULED BACKUP - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         print("=" * 80)
@@ -312,6 +337,7 @@ class BackupScheduler:
         result = self.backup_manager.run_backup(backup_type="auto")
 
         if result:
+            self.logger.success(f"Scheduled backup completed: {result}")
             print(f"\n[OK] Scheduled backup completed: {result}")
 
             # Apply retention policy
@@ -326,6 +352,7 @@ class BackupScheduler:
             print("SCHEDULED BACKUP COMPLETE")
             print("=" * 80)
         else:
+            self.logger.error("Scheduled backup failed")
             print("\n[ERROR] Scheduled backup failed!")
             print("=" * 80)
 
@@ -337,6 +364,7 @@ class BackupScheduler:
         it runs backups on schedule. If disabled, it idles and periodically
         checks if automatic backups have been enabled.
         """
+        self.logger.info("Sipwise Backup Scheduler Starting")
         print("=" * 80)
         print("Sipwise Backup Scheduler Starting")
         print("=" * 80)
@@ -378,6 +406,8 @@ class BackupScheduler:
                     value = frequency_config.get('value', 1)
                     unit = frequency_config.get('unit', 'hours')
 
+                    self.logger.info("Automatic backups ENABLED")
+                    self.logger.debug(f"Frequency: {frequency_seconds} seconds")
                     print(f"Automatic backups ENABLED")
                     print(f"Frequency: Every {value} {unit} ({frequency_seconds} seconds)")
                     print(f"Next backup: {(datetime.now() + timedelta(seconds=frequency_seconds)).strftime('%d/%m/%Y %H:%M:%S')}")

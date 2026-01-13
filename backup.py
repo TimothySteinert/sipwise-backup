@@ -16,6 +16,7 @@ from datetime import datetime
 
 # Import our storage module
 from storage import StorageManager
+from logger import get_logger
 
 
 class BackupManager:
@@ -28,10 +29,12 @@ class BackupManager:
         Args:
             config_path: Path to the configuration file
         """
+        self.config_path = config_path
         self.storage = StorageManager(config_path)
         self.config = self.storage.config
         self.tmp_dir = Path(self.storage.tmp_dir)
         self.ngcp_config_path = Path("/etc/ngcp-config")
+        self.logger = get_logger(config_path)
 
     def _run_command(self, cmd: str) -> str:
         """
@@ -94,14 +97,18 @@ class BackupManager:
         """
         try:
             if not self.ngcp_config_path.exists():
+                self.logger.warn(f"NGCP config not found at {self.ngcp_config_path}")
                 print(f"Warning: NGCP config not found at {self.ngcp_config_path}")
                 return False
 
+            self.logger.debug(f"Backing up NGCP config from {self.ngcp_config_path}")
             print(f"[+] Copying {self.ngcp_config_path}/")
             dest = backup_dir / "ngcp-config"
             shutil.copytree(self.ngcp_config_path, dest)
+            self.logger.success("NGCP config backup completed")
             return True
         except Exception as e:
+            self.logger.error(f"NGCP config backup failed: {e}")
             print(f"Error backing up NGCP config: {e}")
             return False
 
@@ -119,6 +126,7 @@ class BackupManager:
             credentials = self._get_mysql_credentials()
             sql_file = backup_dir / "database.sql"
 
+            self.logger.debug("Starting MySQL database dump")
             print("[+] Dumping full MySQL database...")
             print("    (all databases, routines, triggers, events)")
 
@@ -136,9 +144,11 @@ class BackupManager:
             cmd += f" > {sql_file}"
 
             self._run_command(cmd)
+            self.logger.success("MySQL database dump completed")
             print(f"    Saved to: {sql_file}")
             return True
         except Exception as e:
+            self.logger.error(f"MySQL dump failed: {e}")
             print(f"Error dumping MySQL database: {e}")
             return False
 
@@ -160,6 +170,7 @@ class BackupManager:
         Returns:
             Backup filename if successful, None otherwise
         """
+        self.logger.info(f"Starting {backup_type} backup")
         print("=" * 60)
         print("Starting Backup Process")
         print("=" * 60)
