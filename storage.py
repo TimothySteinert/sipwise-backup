@@ -152,7 +152,7 @@ class StorageManager:
             minute = minute_day[0]
             day = minute_day[1] if len(minute_day) > 1 else time_parts[2]
             month = time_parts[2] if len(minute_day) > 1 else time_parts[3]
-            year = time_parts[3] if len(minute_day) > 1 else parts[-1]
+            year = time_parts[3]
 
             # Create datetime object
             dt = datetime.strptime(f"{year}-{month}-{day} {hour}:{minute}", "%Y-%m-%d %H:%M")
