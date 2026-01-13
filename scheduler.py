@@ -103,9 +103,16 @@ class BackupScheduler:
         if now.day != schedule['day_of_month']:
             return False
         
-        # Parse scheduled time
+        # Parse scheduled time with validation
         scheduled_time = schedule['time']
-        scheduled_hour, scheduled_minute = map(int, scheduled_time.split(':'))
+        try:
+            scheduled_hour, scheduled_minute = map(int, scheduled_time.split(':'))
+            if not (0 <= scheduled_hour <= 23 and 0 <= scheduled_minute <= 59):
+                print(f"[ERROR] Invalid reboot time in config: {scheduled_time}")
+                return False
+        except (ValueError, AttributeError):
+            print(f"[ERROR] Invalid reboot time format in config: {scheduled_time}")
+            return False
         
         # Check if current time matches (within the current minute)
         if now.hour == scheduled_hour and now.minute == scheduled_minute:
@@ -124,7 +131,16 @@ class BackupScheduler:
         print("=" * 80)
         
         # Use subprocess to run the reboot command
-        subprocess.run(['reboot'], check=True)
+        try:
+            subprocess.run(['reboot'], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Reboot command failed: {e}")
+        except PermissionError:
+            print("[ERROR] Insufficient permissions to execute reboot command")
+        except FileNotFoundError:
+            print("[ERROR] Reboot command not found")
+        except Exception as e:
+            print(f"[ERROR] Unexpected error during reboot: {e}")
 
     def apply_retention_policy(self):
         """
@@ -377,8 +393,9 @@ class BackupScheduler:
                         # Check if we already rebooted this month
                         current_month_key = datetime.now().strftime('%Y-%m')
                         if self.last_reboot_month != current_month_key:
-                            self.perform_reboot()
+                            # Update tracking before reboot to prevent race condition
                             self.last_reboot_month = current_month_key
+                            self.perform_reboot()
 
                 # Sleep for a minute before checking again
                 time.sleep(60)
