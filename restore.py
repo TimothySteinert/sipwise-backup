@@ -36,7 +36,18 @@ class RestoreManager:
         self.ngcp_config_dir = Path("/etc/ngcp-config")
         self.source_constants = self.ngcp_config_dir / "constants.yml"
         self.tempkey_path = self.tmp_dir / "tempkey"
-        self.target_key_line = 293
+        
+        # Get Sipwise config line numbers from config (with defaults for backward compatibility)
+        sipwise_config = self.config.get('sipwise', {})
+        constants_config = sipwise_config.get('constants_yml', {})
+        config_yml_config = sipwise_config.get('config_yml', {})
+        
+        self.target_key_line = constants_config.get('sql_encryption_key_line', 293)
+        self.firewall_enable_line = config_yml_config.get('firewall_enable_line', 1568)
+        
+        # Path to ngcp config.yml (different from our app's config.yml)
+        self.ngcp_config_yml = self.ngcp_config_dir / "config.yml"
+        
         self.exclude_files = {"network.yml"}
 
     def _run_command(self, cmd: str, ignore_errors: bool = False) -> int:
@@ -55,6 +66,96 @@ class RestoreManager:
         if result.returncode != 0 and not ignore_errors:
             raise RuntimeError(f"Command failed ({result.returncode}): {cmd}")
         return result.returncode
+
+    def get_current_server_info(self) -> Dict[str, str]:
+        """
+        Get current server name and instance type from config
+        
+        Returns:
+            Dictionary with 'server_name' and 'instance_type'
+        """
+        return {
+            'server_name': self.config.get('server_name', ''),
+            'instance_type': self.config.get('instance_type', '')
+        }
+
+    def is_same_server(self, backup_server_name: str, backup_instance_type: str) -> bool:
+        """
+        Check if the backup is from the same server
+        
+        Args:
+            backup_server_name: Server name from backup filename
+            backup_instance_type: Instance type from backup filename
+            
+        Returns:
+            True if both server name and instance type match
+        """
+        current = self.get_current_server_info()
+        return (
+            current['server_name'] == backup_server_name and
+            current['instance_type'] == backup_instance_type
+        )
+
+    def get_system_ipv4(self) -> str:
+        """
+        Get the primary IPv4 address of the system
+        
+        Returns:
+            IPv4 address string or 'unknown' if cannot determine
+        """
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "unknown"
+
+    def disable_firewall_in_config(self, restore_dir: Path):
+        """
+        Disable firewall in the restored ngcp-config/config.yml
+        
+        Modifies the firewall enable setting from 'yes' to 'no'
+        
+        Args:
+            restore_dir: Directory containing extracted backup
+            
+        Raises:
+            Exception: If modification fails
+        """
+        config_file = restore_dir / "ngcp-config" / "config.yml"
+        
+        if not config_file.exists():
+            raise Exception("config.yml missing from backup ngcp-config!")
+        
+        print(f"[INFO] Disabling firewall in config.yml (line {self.firewall_enable_line})...")
+        
+        with config_file.open("r") as f:
+            lines = f.readlines()
+        
+        if len(lines) < self.firewall_enable_line:
+            raise Exception(f"config.yml has fewer than {self.firewall_enable_line} lines")
+        
+        old_line = lines[self.firewall_enable_line - 1].rstrip()
+        
+        # Verify this is the firewall enable line
+        if 'enable:' not in old_line:
+            raise Exception(
+                f"Line {self.firewall_enable_line} does not appear to be firewall enable setting: {old_line}"
+            )
+        
+        # Get the indentation and replace value
+        indent = old_line.split("enable:")[0]
+        new_line = f"{indent}enable: no\n"
+        
+        lines[self.firewall_enable_line - 1] = new_line
+        
+        with config_file.open("w") as f:
+            f.writelines(lines)
+        
+        print(f"[OK] Firewall disabled (changed from '{old_line.strip()}' to 'enable: no')")
 
     def extract_key(self) -> str:
         """
@@ -215,7 +316,8 @@ class RestoreManager:
         self,
         backup_filename: str,
         preserve_sql_key: bool = True,
-        restore_sip_register: bool = False
+        restore_sip_register: bool = False,
+        disable_firewall: bool = False
     ) -> bool:
         """
         Execute a full restore operation
@@ -224,6 +326,7 @@ class RestoreManager:
             backup_filename: Name of the backup file to restore
             preserve_sql_key: If True, preserve the current SQL encryption key
             restore_sip_register: If True, restore SIP register data (makes environment live)
+            disable_firewall: If True, disable firewall in the restored config
 
         Returns:
             True if successful, False otherwise
@@ -277,6 +380,12 @@ class RestoreManager:
 
             self.restore_ngcp_config(actual_restore_dir)
             print()
+
+            # Step 4.5: Disable firewall if requested
+            if disable_firewall:
+                print("[+] Disabling firewall rules...")
+                self.disable_firewall_in_config(actual_restore_dir)
+                print()
 
             # Step 5: Restore SQL key if preserving
             if preserve_sql_key and original_key:
@@ -353,7 +462,8 @@ class RestoreManager:
 def run_restore(
     backup_filename: str,
     preserve_sql_key: bool = True,
-    restore_sip_register: bool = False
+    restore_sip_register: bool = False,
+    disable_firewall: bool = False
 ) -> bool:
     """
     Run a restore operation
@@ -362,12 +472,13 @@ def run_restore(
         backup_filename: Name of the backup file to restore
         preserve_sql_key: If True, preserve the current SQL encryption key
         restore_sip_register: If True, restore SIP register data
+        disable_firewall: If True, disable firewall in the restored config
 
     Returns:
         True if successful, False otherwise
     """
     manager = RestoreManager()
-    return manager.run_restore(backup_filename, preserve_sql_key, restore_sip_register)
+    return manager.run_restore(backup_filename, preserve_sql_key, restore_sip_register, disable_firewall)
 
 
 def get_restore_manager() -> RestoreManager:
