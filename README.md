@@ -56,8 +56,7 @@ Once the CLI is running, you can use the following menu options:
 - `(2) Run Manual Backup` - Execute a manual backup operation
 - `(3) List Backups` - View all available backups
 - `(4) Restore from Backup` - Restore from a selected backup
-- `(5) Make DR Instance Live` - Activate disaster recovery instance
-- `(6) Exit` - Exit the application
+- `(5) Exit` - Exit the application
 
 ### Running as a Service
 
@@ -157,7 +156,6 @@ sipwise-backup/
   - Manual backup execution
   - Backup listing and management
   - Restore operations with confirmation prompts
-  - DR instance activation
 
 - **storage.py**: Storage management module (centralized file operations)
   - Configuration reading from config.yml
@@ -180,7 +178,6 @@ sipwise-backup/
   - Storage settings (local/remote)
   - MySQL credentials
   - Backup settings (automatic, retention, cleanup)
-  - Sync settings for DR instances
   - Reboot scheduling
 
 ### Installation & Service

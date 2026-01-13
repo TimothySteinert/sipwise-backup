@@ -43,8 +43,7 @@ class SipwiseBackupCLI:
         print("(2) Run Manual Backup")
         print("(3) List Backups")
         print("(4) Restore from Backup")
-        print("(5) Make DR Instance Live")
-        print("(6) Exit")
+        print("(5) Exit")
         print()
 
     def show_config_menu(self):
@@ -335,13 +334,18 @@ class SipwiseBackupCLI:
 
         # Step 3: Restore SIP register data with warning
         print("\n" + "!" * 80)
-        print("WARNING: RESTORING SIP REGISTER DATA WILL MAKE THE ENVIRONMENT LIVE!")
-        print("If restoring to a disaster recovery server,")
-        print("ensure the main server is offline.")
+        print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
+        print("Ensure no other instances are running before continuing.")
         print("!" * 80)
-        print("\nRestore SIP register data? (Y/N): ", end="")
+        print("\nPress N to return to menu or Y to continue: ", end="")
         sip_register = input().strip().upper()
-        restore_sip_register = (sip_register == "Y")
+
+        if sip_register != "Y":
+            print("\nRestore cancelled.")
+            input("\nPress Enter to continue...")
+            return
+
+        restore_sip_register = True
 
         # Execute restore
         print()
@@ -372,41 +376,6 @@ class SipwiseBackupCLI:
         print("Press Enter to return to main menu...")
         input()
 
-    def handle_make_dr_live(self):
-        """Handle making DR instance live"""
-        in_dr_menu = True
-        while in_dr_menu:
-            self.clear_screen()
-            self.show_banner()
-            print("!" * 60)
-            print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
-            print("If restoring to a disaster recovery server,")
-            print("ensure the main server is offline.")
-            print("!" * 60)
-            print("\nAre you sure you want to make this DR instance a live instance?")
-            print("\n(Y) Yes, make live")
-            print("(N) No, return to main menu")
-            print()
-
-            choice = self.get_user_choice().upper()
-
-            if choice == "Y":
-                print("\n[DR instance would be made live here]")
-                print("Press Enter to return to main menu...")
-                input()
-                in_dr_menu = False
-            elif choice == "N":
-                in_dr_menu = False
-            elif choice == "EXIT":
-                self.handle_exit()
-            else:
-                print(f"\nInvalid choice: {choice}")
-                print("Please enter Y or N.")
-                input("\nPress Enter to continue...")
-
-        self.clear_screen()
-        self.show_banner()
-
     def handle_exit(self):
         """Handle exit command"""
         print("\nExiting sipwise-backup...")
@@ -424,8 +393,6 @@ class SipwiseBackupCLI:
         elif choice == "4":
             self.handle_restore_backup()
         elif choice == "5":
-            self.handle_make_dr_live()
-        elif choice == "6":
             self.handle_exit()
         elif choice == "exit":
             self.handle_exit()
