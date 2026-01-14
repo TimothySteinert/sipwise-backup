@@ -168,7 +168,7 @@ IP Address: {server['ip']}
             self.logger.error(f"Email send failed: {e}")
             return False
     
-    def send_backup_success(self, backup_filename: str, storage_location: str,
+    def send_backup_success(self, backup_filename: str, storage_location: str = None,
                            retention_applied: bool = False, cleanup_applied: bool = False,
                            deleted_count: int = 0) -> bool:
         """
@@ -176,7 +176,7 @@ IP Address: {server['ip']}
         
         Args:
             backup_filename: Name of the backup file created
-            storage_location: Where the backup was saved
+            storage_location: (Deprecated) Storage location is now read from config.yml
             retention_applied: Whether retention policy was applied
             cleanup_applied: Whether cleanup policy was applied
             deleted_count: Number of old backups deleted
