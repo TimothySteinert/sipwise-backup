@@ -166,6 +166,14 @@ class BackupScheduler:
         print("\n" + "=" * 80)
         print(f"SCHEDULED REBOOT - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         print("=" * 80)
+        
+        # Save pending notification state BEFORE reboot
+        # This will be checked on next startup to send success email
+        state = self._load_state()
+        state['pending_reboot_notification'] = time.time()
+        self._save_state(state)
+        self.logger.info("Saved pending reboot notification state")
+        
         print("[!] Initiating system reboot...")
         print("=" * 80)
         
@@ -186,8 +194,8 @@ class BackupScheduler:
         # Use subprocess to run the reboot command
         try:
             subprocess.run([reboot_cmd], check=True)
-            # Send success email after reboot command executes successfully
-            self.emailer.send_reboot_success()
+            # Note: Email will be sent after system comes back online
+            # (pending_reboot_notification will be checked on startup)
         except subprocess.CalledProcessError as e:
             self._handle_reboot_error(f"Reboot command failed: {e}")
         except PermissionError:
@@ -475,6 +483,20 @@ class BackupScheduler:
         state = self._load_state()
         last_backup_time = state.get('last_backup_time')  # Can be None or timestamp
         self.last_reboot_month = state.get('last_reboot_month')
+        
+        # Check for pending reboot notification from before reboot
+        pending_reboot_time = state.get('pending_reboot_notification')
+        if pending_reboot_time:
+            self.logger.info("Found pending reboot notification, sending success email")
+            reboot_datetime = datetime.fromtimestamp(pending_reboot_time)
+            
+            # Send the success email
+            self.emailer.send_reboot_success(reboot_initiated_at=reboot_datetime)
+            
+            # Clear the pending notification
+            state['pending_reboot_notification'] = None
+            self._save_state(state)
+            self.logger.success("Reboot success notification sent")
         
         if last_backup_time:
             self.logger.info(f"Loaded last backup time from state: {datetime.fromtimestamp(last_backup_time)}")

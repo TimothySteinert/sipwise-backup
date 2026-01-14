@@ -264,15 +264,35 @@ Recommended Actions:
         
         return self._send_email(subject, body)
     
-    def send_reboot_success(self) -> bool:
-        """Send reboot initiation success notification"""
+    def send_reboot_success(self, reboot_initiated_at: datetime = None) -> bool:
+        """Send reboot success notification
+        
+        Args:
+            reboot_initiated_at: Optional timestamp of when reboot was initiated
+        """
         if not self.should_notify('reboot_success'):
             return False
         
-        subject = self._build_subject("Scheduled Reboot", "INITIATED")
         server_info = self.get_server_info()
         
-        body = f"""SCHEDULED REBOOT INITIATED
+        if reboot_initiated_at:
+            # Reboot completed - sent after system comes back online
+            subject = self._build_subject("Scheduled Reboot", "COMPLETED SUCCESSFULLY")
+            
+            body = f"""SCHEDULED REBOOT COMPLETED SUCCESSFULLY
+
+Server: {server_info['name']} ({server_info['type']})
+Reboot Initiated: {reboot_initiated_at.strftime('%d/%m/%Y %H:%M:%S')}
+System Back Online: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+
+The scheduled system reboot has completed successfully.
+The server is now back online and operational.
+"""
+        else:
+            # Reboot initiated - sent before reboot (legacy behavior, though not reliable)
+            subject = self._build_subject("Scheduled Reboot", "INITIATED")
+            
+            body = f"""SCHEDULED REBOOT INITIATED
 
 Server: {server_info['name']} ({server_info['type']})
 Date/Time: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
