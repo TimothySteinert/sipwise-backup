@@ -59,21 +59,50 @@ class RestoreManager:
         # Pattern matches: optional whitespace, 'enable:', optional whitespace, yes/no
         self.firewall_enable_pattern = re.compile(r'^\s*enable:\s*(yes|no)\s*$')
 
-    def _run_command(self, cmd: str, ignore_errors: bool = False) -> int:
+    def _run_command(self, cmd: str, ignore_errors: bool = False, log_description: str = None) -> int:
         """
         Run a shell command
 
         Args:
             cmd: Command to execute
             ignore_errors: If True, don't raise exception on failure
+            log_description: Optional description for logging
 
         Returns:
             Return code from command
         """
+        log_msg = log_description or cmd
+        self.logger.debug(f"Running command: {cmd}")
         print(f">>> {cmd}")
-        result = subprocess.run(cmd, shell=True)
-        if result.returncode != 0 and not ignore_errors:
-            raise RuntimeError(f"Command failed ({result.returncode}): {cmd}")
+
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+
+        # Log stdout if present
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    self.logger.debug(f"  stdout: {line}")
+
+        # Log stderr if present
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                if line:
+                    self.logger.error(f"  stderr: {line}")
+                    print(f"[ERROR] {line}")
+
+        if result.returncode != 0:
+            error_msg = f"Command failed ({result.returncode}): {cmd}"
+            self.logger.error(error_msg)
+            if not ignore_errors:
+                raise RuntimeError(error_msg)
+        else:
+            self.logger.debug(f"Command completed successfully: {log_msg}")
+
         return result.returncode
 
     def get_current_server_info(self) -> Dict[str, str]:
@@ -134,50 +163,51 @@ class RestoreManager:
         except Exception:
             return "unknown"
 
-    def disable_firewall_in_config(self, restore_dir: Path):
+    def disable_firewall_in_config(self):
         """
-        Disable firewall in the restored ngcp-config/config.yml
-        
+        Disable firewall in the /etc/ngcp-config/config.yml
+
         Modifies the firewall enable setting from 'yes' to 'no'
-        
-        Args:
-            restore_dir: Directory containing extracted backup
-            
+        This should be called AFTER restore_ngcp_config() has copied files to /etc/ngcp-config
+
         Raises:
             Exception: If modification fails
         """
-        config_file = restore_dir / "ngcp-config" / "config.yml"
-        
+        config_file = self.ngcp_config_yml
+
         if not config_file.exists():
-            raise Exception("config.yml missing from backup ngcp-config!")
-        
+            raise Exception(f"config.yml missing from {self.ngcp_config_dir}!")
+
         self.logger.warn("Disabling firewall in configuration")
         print(f"[INFO] Disabling firewall in config.yml (line {self.firewall_enable_line})...")
-        
+
         with config_file.open("r") as f:
             lines = f.readlines()
-        
+
         if len(lines) < self.firewall_enable_line:
-            raise Exception(f"config.yml has fewer than {self.firewall_enable_line} lines")
-        
+            error_msg = f"config.yml has fewer than {self.firewall_enable_line} lines (has {len(lines)} lines)"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+
         old_line = lines[self.firewall_enable_line - 1].rstrip()
-        
+
         # Verify this is the firewall enable line using pre-compiled regex
         if not self.firewall_enable_pattern.match(old_line):
-            raise Exception(
-                f"Line {self.firewall_enable_line} does not appear to be firewall enable setting: {old_line}"
-            )
-        
+            error_msg = f"Line {self.firewall_enable_line} does not appear to be firewall enable setting: {old_line}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
+
         # Get the indentation and replace value
         # Use split with limit=1 to handle edge cases like colons in values or comments
         indent = old_line.split("enable:", 1)[0]
         new_line = f"{indent}enable: no\n"
-        
+
         lines[self.firewall_enable_line - 1] = new_line
-        
+
         with config_file.open("w") as f:
             f.writelines(lines)
-        
+
+        self.logger.success(f"Firewall disabled in {config_file}")
         print(f"[OK] Firewall disabled (changed from '{old_line.strip()}' to 'enable: no')")
 
     def extract_key(self) -> str:
@@ -329,16 +359,29 @@ class RestoreManager:
         self.logger.success("MySQL database restored successfully")
         print("[OK] MySQL database restored")
 
-    def apply_configuration(self):
+    def apply_configuration(self, stage: str = ""):
         """
         Apply NGCP configuration using ngcpcfg
+
+        Args:
+            stage: Optional stage identifier (e.g., "stage1", "stage2")
 
         Raises:
             Exception: If configuration apply fails
         """
-        print("[INFO] Applying configuration...")
-        self._run_command("ngcpcfg apply 'restored the system from backup'")
-        print("[OK] Configuration applied")
+        stage_msg = f" ({stage})" if stage else ""
+        commit_msg = f"restored the system from backup{' - ' + stage if stage else ''}"
+
+        print(f"[INFO] Applying configuration{stage_msg}...")
+        self.logger.info(f"Running ngcpcfg apply: {commit_msg}")
+
+        self._run_command(
+            f"ngcpcfg apply '{commit_msg}'",
+            log_description=f"ngcpcfg apply {stage if stage else 'final'}"
+        )
+
+        self.logger.success(f"Configuration applied successfully{stage_msg}")
+        print(f"[OK] Configuration applied{stage_msg}")
 
     def run_restore(
         self,
@@ -360,6 +403,7 @@ class RestoreManager:
             True if successful, False otherwise
         """
         self.logger.info(f"Starting restore from backup: {backup_filename}")
+        self.logger.info(f"Options: preserve_sql_key={preserve_sql_key}, disable_firewall={disable_firewall}, restore_sip_register={restore_sip_register}")
         print("=" * 80)
         print("Starting Restore Process")
         print("=" * 80)
@@ -371,23 +415,30 @@ class RestoreManager:
         try:
             # Step 1: Extract and save current SQL key if preserving
             if preserve_sql_key:
-                print("[+] Extracting current SQL encryption key...")
+                print("[+] Step 1: Extracting current SQL encryption key from /etc/ngcp-config/constants.yml...")
+                self.logger.info("Extracting current SQL encryption key for preservation")
                 original_key = self.extract_key()
                 self.save_key_to_temp(original_key)
+                self.logger.debug(f"Saved encryption key to temp file: {self.tempkey_path}")
                 print()
 
             # Step 2: Download backup to tmp
-            print(f"[+] Downloading backup: {backup_filename}")
+            print(f"[+] Step 2: Downloading backup: {backup_filename}")
+            self.logger.info(f"Downloading backup file: {backup_filename}")
             zip_path = self.storage.download_backup_to_tmp(backup_filename)
 
             if not zip_path:
-                raise Exception(f"Failed to download backup: {backup_filename}")
+                error_msg = f"Failed to download backup: {backup_filename}"
+                self.logger.error(error_msg)
+                raise Exception(error_msg)
 
+            self.logger.success(f"Downloaded backup to: {zip_path}")
             print(f"    Downloaded to: {zip_path}")
             print()
 
             # Step 3: Extract backup
-            print("[+] Extracting backup...")
+            print("[+] Step 3: Extracting backup archive...")
+            self.logger.info("Extracting backup archive")
             restore_dir = self.tmp_dir / f"RESTORE-{Path(zip_path).stem}"
 
             if restore_dir.exists():
@@ -396,11 +447,14 @@ class RestoreManager:
             restore_dir.mkdir(parents=True)
 
             extract_path = self.storage.unzip_backup(zip_path, str(restore_dir))
+            self.logger.success(f"Extracted backup to: {extract_path}")
             print(f"    Extracted to: {extract_path}")
             print()
 
-            # Step 4: Restore NGCP config
-            print("[+] Restoring NGCP configuration...")
+            # Step 4: Restore NGCP config (excluding network.yml)
+            print("[+] Step 4: Restoring NGCP configuration to /etc/ngcp-config...")
+            self.logger.info("Restoring NGCP configuration (excluding network.yml)")
+
             # If extracted to subdirectory, adjust path
             actual_restore_dir = Path(extract_path)
             if not (actual_restore_dir / "ngcp-config").exists():
@@ -408,65 +462,115 @@ class RestoreManager:
                 actual_restore_dir = restore_dir
 
             self.restore_ngcp_config(actual_restore_dir)
+            self.logger.success("NGCP configuration restored")
             print()
 
-            # Step 4.5: Disable firewall if requested
-            if disable_firewall:
-                print("[+] Disabling firewall rules...")
-                self.disable_firewall_in_config(actual_restore_dir)
-                print()
-
-            # Step 5: Restore SQL key if preserving
+            # Step 5: Restore SQL key if preserving (modifies /etc/ngcp-config/constants.yml)
             if preserve_sql_key and original_key:
-                print("[+] Restoring original SQL encryption key...")
+                print("[+] Step 5: Restoring original SQL encryption key to /etc/ngcp-config/constants.yml...")
+                self.logger.info("Restoring original SQL encryption key")
                 self.restore_key_into_constants()
+                self.logger.success("SQL encryption key restored")
                 print()
             else:
-                print("[!] Using SQL encryption key from backup")
+                print("[!] Step 5: Using SQL encryption key from backup (NOT recommended for DR restore)")
+                self.logger.warn("Using SQL encryption key from backup - this may cause database startup failures on different servers")
                 print()
 
-            # Step 6: Restore MySQL database
-            print("[+] Restoring MySQL database...")
+            # Step 6: Disable firewall if requested (modifies /etc/ngcp-config/config.yml)
+            if disable_firewall:
+                print("[+] Step 6: Disabling firewall in /etc/ngcp-config/config.yml...")
+                self.logger.info("Disabling firewall in configuration")
+                self.disable_firewall_in_config()
+                print()
+            else:
+                print("[!] Step 6: Firewall settings unchanged (using backup settings)")
+                self.logger.info("Firewall settings not modified - using backup settings")
+                print()
+
+            # Step 7: Apply configuration - STAGE 1
+            print("[+] Step 7: Applying NGCP configuration (Stage 1)...")
+            self.logger.info("Applying NGCP configuration - Stage 1 (before database restore)")
+            self.apply_configuration("stage1")
+            print()
+
+            # Step 8: Restore MySQL database
+            print("[+] Step 8: Restoring MySQL database...")
+            self.logger.info("Restoring MySQL database")
             self.restore_mysql_database(actual_restore_dir)
             print()
 
-            # Step 7: Apply configuration
-            print("[+] Applying NGCP configuration...")
-            self.apply_configuration()
+            # Step 9: Apply configuration - STAGE 2
+            print("[+] Step 9: Applying NGCP configuration (Stage 2)...")
+            self.logger.info("Applying NGCP configuration - Stage 2 (after database restore)")
+            self.apply_configuration("stage2")
             print()
 
-            # Step 8: Handle SIP register restoration
+            # Step 10: Handle SIP register restoration
             if restore_sip_register:
-                print("[+] Restoring SIP register data...")
+                print("[+] Step 10: Restoring SIP register data...")
                 print("[!] WARNING: This makes the environment LIVE!")
+                self.logger.warn("SIP register restoration requested - this will make the environment LIVE")
                 # Placeholder for SIP register restoration
+                self.logger.error("SIP register restoration not yet implemented")
                 print("[TODO] SIP register restoration not yet implemented")
                 print()
 
-            # Step 9: Cleanup
+            # Step 11: Cleanup
             print("[+] Cleaning up temporary files...")
+            self.logger.info("Cleaning up temporary files")
             self.storage.clean_tmp()
+            self.logger.success("Temporary files cleaned up")
             print()
 
             print("=" * 80)
-            print("RESTORE COMPLETED SUCCESSFULLY")
+            print("✓ RESTORE COMPLETED SUCCESSFULLY")
             print("=" * 80)
-            print()
+            self.logger.success("Restore completed successfully")
 
+            # Prompt for reboot
+            print()
+            print("[!] IMPORTANT: A system reboot is recommended to complete the restore.")
+            self.logger.warn("System reboot recommended to complete restore")
+            response = input("Would you like to reboot now? [y/N]: ").strip().lower()
+
+            if response in ['y', 'yes']:
+                print("[!] Rebooting system in 5 seconds...")
+                self.logger.info("User requested immediate reboot")
+                print("    Press Ctrl+C to cancel...")
+                try:
+                    import time
+                    time.sleep(5)
+                    self.logger.info("Initiating system reboot")
+                    self._run_command("reboot", ignore_errors=True)
+                except KeyboardInterrupt:
+                    print()
+                    print("[!] Reboot cancelled by user")
+                    self.logger.info("Reboot cancelled by user")
+            else:
+                print("[!] Reboot skipped. Please reboot manually when ready.")
+                self.logger.info("User chose to skip immediate reboot")
+
+            print()
             return True
 
         except Exception as e:
+            error_msg = str(e)
             print()
             print("=" * 80)
-            print(f"RESTORE FAILED: {e}")
+            print(f"✗ RESTORE FAILED: {error_msg}")
             print("=" * 80)
             print()
 
+            # Log the full error
+            self.logger.error(f"Restore failed: {error_msg}")
+
             # Cleanup on failure
             try:
+                self.logger.info("Attempting cleanup after failure")
                 self.storage.clean_tmp()
-            except:
-                pass
+            except Exception as cleanup_error:
+                self.logger.error(f"Cleanup failed: {cleanup_error}")
 
             return False
 
