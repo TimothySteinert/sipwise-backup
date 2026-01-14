@@ -387,7 +387,6 @@ class RestoreManager:
         self,
         backup_filename: str,
         preserve_sql_key: bool = True,
-        restore_sip_register: bool = False,
         disable_firewall: bool = False
     ) -> bool:
         """
@@ -396,14 +395,13 @@ class RestoreManager:
         Args:
             backup_filename: Name of the backup file to restore
             preserve_sql_key: If True, preserve the current SQL encryption key
-            restore_sip_register: If True, restore SIP register data (makes environment live)
             disable_firewall: If True, disable firewall in the restored config
 
         Returns:
             True if successful, False otherwise
         """
         self.logger.info(f"Starting restore from backup: {backup_filename}")
-        self.logger.info(f"Options: preserve_sql_key={preserve_sql_key}, disable_firewall={disable_firewall}, restore_sip_register={restore_sip_register}")
+        self.logger.info(f"Options: preserve_sql_key={preserve_sql_key}, disable_firewall={disable_firewall}")
         print("=" * 80)
         print("Starting Restore Process")
         print("=" * 80)
@@ -506,17 +504,7 @@ class RestoreManager:
             self.apply_configuration("stage2")
             print()
 
-            # Step 10: Handle SIP register restoration
-            if restore_sip_register:
-                print("[+] Step 10: Restoring SIP register data...")
-                print("[!] WARNING: This makes the environment LIVE!")
-                self.logger.warn("SIP register restoration requested - this will make the environment LIVE")
-                # Placeholder for SIP register restoration
-                self.logger.error("SIP register restoration not yet implemented")
-                print("[TODO] SIP register restoration not yet implemented")
-                print()
-
-            # Step 11: Cleanup
+            # Step 10: Cleanup
             print("[+] Cleaning up temporary files...")
             self.logger.info("Cleaning up temporary files")
             self.storage.clean_tmp()
@@ -595,7 +583,6 @@ class RestoreManager:
 def run_restore(
     backup_filename: str,
     preserve_sql_key: bool = True,
-    restore_sip_register: bool = False,
     disable_firewall: bool = False
 ) -> bool:
     """
@@ -604,14 +591,13 @@ def run_restore(
     Args:
         backup_filename: Name of the backup file to restore
         preserve_sql_key: If True, preserve the current SQL encryption key
-        restore_sip_register: If True, restore SIP register data
         disable_firewall: If True, disable firewall in the restored config
 
     Returns:
         True if successful, False otherwise
     """
     manager = RestoreManager()
-    return manager.run_restore(backup_filename, preserve_sql_key, restore_sip_register, disable_firewall)
+    return manager.run_restore(backup_filename, preserve_sql_key, disable_firewall)
 
 
 def get_restore_manager() -> RestoreManager:
