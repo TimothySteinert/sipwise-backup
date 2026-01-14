@@ -166,6 +166,14 @@ class BackupScheduler:
         print("\n" + "=" * 80)
         print(f"SCHEDULED REBOOT - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         print("=" * 80)
+        
+        # Save pending notification state BEFORE reboot
+        # This will be checked on next startup to send success email
+        state = self._load_state()
+        state['pending_reboot_notification'] = time.time()
+        self._save_state(state)
+        self.logger.info("Saved pending reboot notification state")
+        
         print("[!] Initiating system reboot...")
         print("=" * 80)
         
@@ -186,8 +194,8 @@ class BackupScheduler:
         # Use subprocess to run the reboot command
         try:
             subprocess.run([reboot_cmd], check=True)
-            # Send success email after reboot command executes successfully
-            self.emailer.send_reboot_success()
+            # Note: Email will be sent after system comes back online
+            # (pending_reboot_notification will be checked on startup)
         except subprocess.CalledProcessError as e:
             self._handle_reboot_error(f"Reboot command failed: {e}")
         except PermissionError:
@@ -476,6 +484,20 @@ class BackupScheduler:
         last_backup_time = state.get('last_backup_time')  # Can be None or timestamp
         self.last_reboot_month = state.get('last_reboot_month')
         
+        # Check for pending reboot notification from before reboot
+        pending_reboot_time = state.get('pending_reboot_notification')
+        if pending_reboot_time:
+            self.logger.info("Found pending reboot notification, sending success email")
+            reboot_datetime = datetime.fromtimestamp(pending_reboot_time)
+            
+            # Send the success email
+            self.emailer.send_reboot_success(reboot_initiated_at=reboot_datetime)
+            
+            # Clear the pending notification
+            state.pop('pending_reboot_notification', None)
+            self._save_state(state)
+            self.logger.success("Reboot success notification sent")
+        
         if last_backup_time:
             self.logger.info(f"Loaded last backup time from state: {datetime.fromtimestamp(last_backup_time)}")
         
@@ -536,11 +558,11 @@ class BackupScheduler:
                     self.run_scheduled_backup()
                     last_backup_time = current_time
                     
-                    # Save state after backup
-                    self._save_state({
-                        'last_backup_time': last_backup_time,
-                        'last_reboot_month': self.last_reboot_month
-                    })
+                    # Save state after backup (preserve pending_reboot_notification if it exists)
+                    state = self._load_state()
+                    state['last_backup_time'] = last_backup_time
+                    state['last_reboot_month'] = self.last_reboot_month
+                    self._save_state(state)
 
                     # Recalculate frequency in case config changed
                     frequency_seconds = self.get_backup_frequency_seconds()
@@ -557,11 +579,11 @@ class BackupScheduler:
                         if self.last_reboot_month != current_month_key:
                             # Update tracking before reboot to prevent race condition
                             self.last_reboot_month = current_month_key
-                            # Save state before reboot
-                            self._save_state({
-                                'last_backup_time': last_backup_time,
-                                'last_reboot_month': self.last_reboot_month
-                            })
+                            # Save state before reboot (preserve pending_reboot_notification if it exists)
+                            state = self._load_state()
+                            state['last_backup_time'] = last_backup_time
+                            state['last_reboot_month'] = self.last_reboot_month
+                            self._save_state(state)
                             self.perform_reboot()
 
                 # Sleep for a minute before checking again
