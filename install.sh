@@ -298,7 +298,7 @@ print(password)
 
         # Create MySQL users from template
         echo "Creating MySQL users from template..."
-        python3 << 'PYEOF'
+        python3 << PYEOF
 import yaml
 import subprocess
 
