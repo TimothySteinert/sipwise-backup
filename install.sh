@@ -159,6 +159,7 @@ echo ""
 # Variables for later use
 USE_BACKUP_CONFIG=false
 USE_TEMPLATE=false
+CONFIG_FILE="$INSTALL_DIR/config.yml"
 
 if [ "$SERVER_TYPE" = "master" ]; then
     # Master server configuration
@@ -166,23 +167,14 @@ if [ "$SERVER_TYPE" = "master" ]; then
     echo ""
     read -p "Enter server name: " SERVER_NAME
 
-    # Update config.yml with server name and instance type
-    CONFIG_FILE="$INSTALL_DIR/config.yml"
-
+    # Update config.yml with server name and instance type using sed
     echo "Updating configuration..."
-    python3 << EOF
-import yaml
 
-config_file = '$CONFIG_FILE'
-with open(config_file, 'r') as f:
-    config = yaml.safe_load(f)
+    # Update instance_type
+    sed -i "s/^instance_type:.*/instance_type: master/" "$CONFIG_FILE"
 
-config['server_name'] = '$SERVER_NAME'
-config['instance_type'] = 'master'
-
-with open(config_file, 'w') as f:
-    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-EOF
+    # Update server_name
+    sed -i "s/^server_name:.*/server_name: $SERVER_NAME/" "$CONFIG_FILE"
 
     echo -e "${GREEN}✓ Configuration updated${NC}"
     echo ""
@@ -218,23 +210,14 @@ else
     read -p "Enter server name: " SERVER_NAME
     echo ""
 
-    # Update config.yml with server name and instance type
-    CONFIG_FILE="$INSTALL_DIR/config.yml"
-
+    # Update config.yml with server name and instance type using sed
     echo "Updating server configuration..."
-    python3 << EOF
-import yaml
 
-config_file = '$CONFIG_FILE'
-with open(config_file, 'r') as f:
-    config = yaml.safe_load(f)
+    # Update instance_type
+    sed -i "s/^instance_type:.*/instance_type: dr/" "$CONFIG_FILE"
 
-config['server_name'] = '$SERVER_NAME'
-config['instance_type'] = 'dr'
-
-with open(config_file, 'w') as f:
-    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-EOF
+    # Update server_name
+    sed -i "s/^server_name:.*/server_name: $SERVER_NAME/" "$CONFIG_FILE"
 
     echo -e "${GREEN}✓ Server configuration updated${NC}"
     echo ""
@@ -248,53 +231,38 @@ EOF
 
         TEMPLATE_FILE="$SCRIPT_DIR/setup.template"
 
-        # Parse template and extract values
+        # Parse template and extract values using Python with correct argument passing
         echo "Parsing template file..."
 
         # Extract passwords from template
-        CDREXPORT_PASSWORD=$(python3 << 'EOF'
+        CDREXPORT_PASSWORD=$(python3 -c "
 import yaml
-import sys
-
-template_file = sys.argv[1]
-with open(template_file, 'r') as f:
+with open('$TEMPLATE_FILE', 'r') as f:
     template = yaml.safe_load(f)
-
 system_users = template.get('system_users', {})
 cdrexport = system_users.get('cdrexport', {})
 password = cdrexport.get('password', '')
 print(password)
-EOF
-"$TEMPLATE_FILE")
+")
 
-        ROOT_PASSWORD=$(python3 << 'EOF'
+        ROOT_PASSWORD=$(python3 -c "
 import yaml
-import sys
-
-template_file = sys.argv[1]
-with open(template_file, 'r') as f:
+with open('$TEMPLATE_FILE', 'r') as f:
     template = yaml.safe_load(f)
-
 system_users = template.get('system_users', {})
 root = system_users.get('root', {})
 password = root.get('password', '')
 print(password)
-EOF
-"$TEMPLATE_FILE")
+")
 
-        MYSQL_ROOT_PASSWORD=$(python3 << 'EOF'
+        MYSQL_ROOT_PASSWORD=$(python3 -c "
 import yaml
-import sys
-
-template_file = sys.argv[1]
-with open(template_file, 'r') as f:
+with open('$TEMPLATE_FILE', 'r') as f:
     template = yaml.safe_load(f)
-
 mysql = template.get('mysql', {})
 password = mysql.get('root_password', '')
 print(password)
-EOF
-"$TEMPLATE_FILE")
+")
 
         # Set system user passwords
         if [ -n "$CDREXPORT_PASSWORD" ]; then
@@ -329,14 +297,13 @@ EOF
         echo ""
 
         # Create MySQL users from template
-        echo "Creating MySQL users..."
+        echo "Creating MySQL users from template..."
         python3 << 'PYEOF'
 import yaml
 import subprocess
-import sys
 
-template_file = sys.argv[1]
-mysql_root_password = sys.argv[2]
+template_file = '$TEMPLATE_FILE'
+mysql_root_password = '$MYSQL_ROOT_PASSWORD'
 
 with open(template_file, 'r') as f:
     template = yaml.safe_load(f)
@@ -355,66 +322,53 @@ for user in users:
 
         # Create user
         create_cmd = f"CREATE USER IF NOT EXISTS '{username}'@'{host}' IDENTIFIED BY '{password}';"
-        subprocess.run(['mysql', f'-proot:{mysql_root_password}', '-e', create_cmd],
-                      stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(['mysql', '-e', create_cmd], stderr=subprocess.DEVNULL, check=False)
 
         # Grant privileges
         grant_cmd = f"GRANT {privileges} ON *.* TO '{username}'@'{host}';"
-        subprocess.run(['mysql', f'-proot:{mysql_root_password}', '-e', grant_cmd],
-                      stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(['mysql', '-e', grant_cmd], stderr=subprocess.DEVNULL, check=False)
 
         # Flush privileges
         flush_cmd = "FLUSH PRIVILEGES;"
-        subprocess.run(['mysql', f'-proot:{mysql_root_password}', '-e', flush_cmd],
-                      stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(['mysql', '-e', flush_cmd], stderr=subprocess.DEVNULL, check=False)
 
         print(f"✓ User {username}@{host} created with {privileges}")
 PYEOF
-"$TEMPLATE_FILE" "$MYSQL_ROOT_PASSWORD"
 
         echo ""
 
-        # Update config.yml with MySQL credentials from template
-        echo "Updating config.yml with MySQL credentials..."
-        python3 << 'PYEOF'
+        # Update config.yml with MySQL credentials from template using sed
+        echo "Updating config.yml with MySQL credentials from template..."
+
+        # Extract first MySQL user from template
+        MYSQL_USER=$(python3 -c "
 import yaml
-import sys
-
-template_file = sys.argv[1]
-config_file = sys.argv[2]
-
-# Read template
-with open(template_file, 'r') as f:
+with open('$TEMPLATE_FILE', 'r') as f:
     template = yaml.safe_load(f)
-
-# Read config
-with open(config_file, 'r') as f:
-    config = yaml.safe_load(f)
-
-# Get first MySQL user from template
 mysql_config = template.get('mysql', {})
 users = mysql_config.get('users', [])
-
 if users:
-    first_user = users[0]
-    username = first_user.get('username')
-    password = first_user.get('password')
+    print(users[0].get('username', ''))
+")
 
-    if username and password:
-        # Update config
-        if 'mysql' not in config:
-            config['mysql'] = {}
+        MYSQL_PASSWORD=$(python3 -c "
+import yaml
+with open('$TEMPLATE_FILE', 'r') as f:
+    template = yaml.safe_load(f)
+mysql_config = template.get('mysql', {})
+users = mysql_config.get('users', [])
+if users:
+    print(users[0].get('password', ''))
+")
 
-        config['mysql']['user'] = username
-        config['mysql']['password'] = password
+        if [ -n "$MYSQL_USER" ] && [ -n "$MYSQL_PASSWORD" ]; then
+            # Use sed to update MySQL user and password while preserving formatting
+            # This uses a more complex sed command to find and replace in the mysql section
+            sed -i "/^mysql:/,/^[^ ]/ s/^  user:.*/  user: $MYSQL_USER/" "$CONFIG_FILE"
+            sed -i "/^mysql:/,/^[^ ]/ s/^  password:.*/  password: $MYSQL_PASSWORD/" "$CONFIG_FILE"
 
-        # Write config
-        with open(config_file, 'w') as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-        print(f"✓ Config updated with MySQL user: {username}")
-PYEOF
-"$TEMPLATE_FILE" "$CONFIG_FILE"
+            echo -e "${GREEN}✓ Config updated with MySQL user: $MYSQL_USER${NC}"
+        fi
 
         echo -e "${GREEN}✓ Template processing completed${NC}"
         echo ""
