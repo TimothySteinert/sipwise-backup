@@ -39,6 +39,21 @@ fi
 
 echo -e "${GREEN}✓ Python3 found: $(python3 --version)${NC}"
 
+# Check for required Python modules
+echo "Checking Python dependencies..."
+
+# Test if smtplib is available (should be built-in)
+if ! python3 -c "import smtplib" 2>/dev/null; then
+    echo -e "${YELLOW}Warning: Python smtplib not available. Email notifications may not work.${NC}"
+fi
+
+# Test if email.mime is available (should be built-in)
+if ! python3 -c "from email.mime.text import MIMEText" 2>/dev/null; then
+    echo -e "${YELLOW}Warning: Python email module not available. Email notifications may not work.${NC}"
+fi
+
+echo -e "${GREEN}✓ Python dependencies checked${NC}"
+
 # Check if zip file exists in current directory
 if [ ! -f "./$ZIP_FILE" ]; then
     echo -e "${RED}Error: $ZIP_FILE not found in current directory${NC}"
@@ -63,6 +78,16 @@ mkdir -p "$INSTALL_DIR"
 # Extract zip file to installation directory using Python
 echo "Extracting $ZIP_FILE to $INSTALL_DIR..."
 python3 -c "import zipfile; zipfile.ZipFile('./$ZIP_FILE').extractall('$INSTALL_DIR')"
+
+# Create log directory
+echo "Creating log directory..."
+mkdir -p "$INSTALL_DIR/log"
+chmod 755 "$INSTALL_DIR/log"
+
+# Create state directory
+echo "Creating state directory..."
+mkdir -p "$INSTALL_DIR/state"
+chmod 755 "$INSTALL_DIR/state"
 
 # Set executable permissions
 echo "Setting file permissions..."

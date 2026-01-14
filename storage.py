@@ -13,8 +13,10 @@ import yaml
 import zipfile
 import shutil
 from datetime import datetime
-from ftplib import FTP
+from ftplib import FTP, error_perm
 from typing import List, Dict, Optional, Tuple
+
+from logger import get_logger
 
 
 class StorageManager:
@@ -31,6 +33,7 @@ class StorageManager:
         self.config = self._load_config()
         self.tmp_dir = "/opt/sipwise-backup/tmp"
         self._ensure_tmp_dir()
+        self.logger = get_logger(config_path)
 
     def _load_config(self) -> Dict:
         """
@@ -51,6 +54,52 @@ class StorageManager:
     def _ensure_tmp_dir(self):
         """Ensure the temporary directory exists"""
         os.makedirs(self.tmp_dir, exist_ok=True)
+
+    def _ftp_connect(self) -> FTP:
+        """
+        Connect to FTP server using config credentials
+        
+        Returns:
+            FTP connection object
+            
+        Raises:
+            Exception: If connection fails
+        """
+        remote_config = self.config.get('storage', {}).get('remote', {})
+        hostname = remote_config.get('hostname')
+        port = remote_config.get('port', 21)
+        username = remote_config.get('username', '')
+        password = remote_config.get('password', '')
+        directory = remote_config.get('directory', '/backups/sipwise')
+        
+        if not hostname:
+            raise Exception("FTP hostname not configured in config.yml")
+        
+        self.logger.debug(f"Connecting to FTP server: {hostname}:{port}")
+        ftp = FTP()
+        ftp.connect(hostname, port)
+        ftp.login(username, password)
+        
+        # Create directory if it doesn't exist and navigate to it
+        try:
+            ftp.cwd(directory)
+        except error_perm:
+            # Try to create the directory path
+            self._ftp_mkdirs(ftp, directory)
+            ftp.cwd(directory)
+        
+        return ftp
+
+    def _ftp_mkdirs(self, ftp: FTP, path: str):
+        """Create directories recursively on FTP server"""
+        dirs = path.strip('/').split('/')
+        current = ''
+        for d in dirs:
+            current += '/' + d
+            try:
+                ftp.cwd(current)
+            except error_perm:
+                ftp.mkd(current)
 
     def get_storage_type(self) -> str:
         """
@@ -76,12 +125,13 @@ class StorageManager:
         else:  # remote
             return storage_config.get('remote', {}).get('directory', '/backups/sipwise')
 
-    def generate_backup_name(self, extension: str = '.zip') -> str:
+    def generate_backup_name(self, backup_type: str = "auto", extension: str = '.zip') -> str:
         """
         Generate a backup filename using the format:
-        server_name-instance_type-date(HH:MM/DD/MM/YYYY)
+        server_name-instance_type-backup_type-date(HH:MM/DD/MM/YYYY)
 
         Args:
+            backup_type: Type of backup ("auto" or "manual")
             extension: File extension (default: .zip)
 
         Returns:
@@ -94,7 +144,7 @@ class StorageManager:
         now = datetime.now()
         date_str = now.strftime("%H-%M_%d-%m-%Y")
 
-        return f"{server_name}-{instance_type}-{date_str}{extension}"
+        return f"{server_name}-{instance_type}-{backup_type}-{date_str}{extension}"
 
     def parse_backup_name(self, filename: str) -> Optional[Dict]:
         """
@@ -104,7 +154,7 @@ class StorageManager:
             filename: Backup filename to parse
 
         Returns:
-            Dictionary with server_name, instance_type, and datetime, or None if invalid
+            Dictionary with server_name, instance_type, type, and datetime, or None if invalid
         """
         try:
             # Remove extension
@@ -113,21 +163,45 @@ class StorageManager:
             # Split by hyphens
             parts = name_without_ext.split('-')
 
-            if len(parts) < 5:
+            # Minimum parts needed:
+            # Old format: server-instance-HH-MM_DD-MM-YYYY
+            #   Example: "myserver-master-14-30_13-01-2026" = 6 parts
+            # New format: server-instance-auto-HH-MM_DD-MM-YYYY
+            #   Example: "myserver-master-auto-14-30_13-01-2026" = 7 parts
+            if len(parts) < 6:
                 return None
 
-            # Reconstruct server name (may contain hyphens)
-            # Last 5 parts are: instance, HH, MM_DD, MM, YYYY
-            time_parts = parts[-5:]
-            server_name = '-'.join(parts[:-5])
-
-            instance_type = time_parts[0]
-            hour = time_parts[1]
-            minute_day = time_parts[2].split('_')
+            # Try to detect if backup_type is present (auto/manual)
+            # Time is always the last 4 parts: HH, MM_DD, MM, YYYY
+            backup_type = "unknown"
+            
+            # Check if the 5th part from the end is 'auto' or 'manual'
+            if len(parts) >= 7 and parts[-5] in ['auto', 'manual']:
+                # New format with backup type
+                backup_type = parts[-5]
+                server_instance_parts = parts[:-5]  # everything before backup_type
+            else:
+                # Old format without backup type
+                server_instance_parts = parts[:-4]  # everything before time
+            
+            # Extract server_name and instance_type from server_instance_parts
+            instance_type = server_instance_parts[-1] if server_instance_parts else 'unknown'
+            server_name = '-'.join(server_instance_parts[:-1]) if len(server_instance_parts) > 1 else 'unknown'
+            
+            # Parse time parts: HH, MM_DD, MM, YYYY
+            time_parts = parts[-4:]
+            hour = time_parts[0]
+            minute_day = time_parts[1].split('_')
+            
+            # Expect MM_DD format with underscore
+            if len(minute_day) != 2:
+                # Malformed filename - missing underscore in MM_DD
+                return None
+            
             minute = minute_day[0]
-            day = minute_day[1] if len(minute_day) > 1 else time_parts[3]
-            month = time_parts[3] if len(minute_day) > 1 else time_parts[4]
-            year = time_parts[4] if len(minute_day) > 1 else parts[-1]
+            day = minute_day[1]
+            month = time_parts[2]
+            year = time_parts[3]
 
             # Create datetime object
             dt = datetime.strptime(f"{year}-{month}-{day} {hour}:{minute}", "%Y-%m-%d %H:%M")
@@ -135,6 +209,7 @@ class StorageManager:
             return {
                 'server_name': server_name,
                 'instance_type': instance_type,
+                'type': backup_type,
                 'datetime': dt,
                 'filename': filename
             }
@@ -219,27 +294,18 @@ class StorageManager:
             True if successful, False otherwise
         """
         try:
-            remote_config = self.config.get('storage', {}).get('remote', {})
-            username = remote_config.get('username', '')
-            password = remote_config.get('password', '')
-            directory = remote_config.get('directory', '/backups/sipwise')
-
-            # Note: FTP server hostname should be added to config
-            # For now, this is a placeholder
-            # ftp = FTP(hostname)
-            # ftp.login(username, password)
-            # ftp.cwd(directory)
-            #
-            # filename = os.path.basename(zip_path)
-            # with open(zip_path, 'rb') as f:
-            #     ftp.storbinary(f'STOR {filename}', f)
-            #
-            # ftp.quit()
-
-            print("Remote FTP storage not fully implemented yet")
-            return False
+            ftp = self._ftp_connect()
+            filename = os.path.basename(zip_path)
+            
+            self.logger.debug(f"Uploading {filename} to FTP server")
+            with open(zip_path, 'rb') as f:
+                ftp.storbinary(f'STOR {filename}', f)
+            
+            ftp.quit()
+            self.logger.success(f"Backup uploaded to FTP: {filename}")
+            return True
         except Exception as e:
-            print(f"Error saving backup to FTP: {e}")
+            self.logger.error(f"Error saving backup to FTP: {e}")
             return False
 
     def save_backup(self, zip_path: str) -> bool:
@@ -253,11 +319,23 @@ class StorageManager:
             True if successful, False otherwise
         """
         storage_type = self.get_storage_type()
+        
+        self.logger.debug(f"Saving backup: {os.path.basename(zip_path)}")
 
         if storage_type == 'local':
-            return self.save_backup_local(zip_path)
+            result = self.save_backup_local(zip_path)
+            if result:
+                self.logger.success(f"Backup saved to {self.get_storage_directory()}")
+            else:
+                self.logger.error(f"Failed to save backup to local storage")
+            return result
         else:  # remote
-            return self.save_backup_remote(zip_path)
+            result = self.save_backup_remote(zip_path)
+            if result:
+                self.logger.success(f"Backup saved to remote storage")
+            else:
+                self.logger.error(f"Failed to save backup to remote storage")
+            return result
 
     def list_backups(self) -> List[Dict]:
         """
@@ -306,9 +384,35 @@ class StorageManager:
         Returns:
             List of backup metadata dictionaries
         """
-        # Placeholder for FTP implementation
-        print("Remote FTP listing not fully implemented yet")
-        return []
+        backups = []
+        try:
+            ftp = self._ftp_connect()
+            
+            # List files in directory
+            files = ftp.nlst()
+            
+            for filename in files:
+                if filename.endswith('.zip'):
+                    metadata = self.parse_backup_name(filename)
+                    if metadata:
+                        # Get file size
+                        try:
+                            size = ftp.size(filename)
+                        except:
+                            size = 0
+                        metadata['size'] = size
+                        metadata['path'] = filename  # Remote path is just filename
+                        backups.append(metadata)
+            
+            ftp.quit()
+            
+            # Sort by datetime, newest first
+            backups.sort(key=lambda x: x['datetime'], reverse=True)
+            
+        except Exception as e:
+            self.logger.error(f"Error listing backups from FTP: {e}")
+        
+        return backups
 
     def get_backup_by_name(self, filename: str) -> Optional[str]:
         """
@@ -349,11 +453,29 @@ class StorageManager:
                 shutil.copy2(source, destination)
                 return destination
         else:
-            # Placeholder for FTP download
-            print("Remote FTP download not fully implemented yet")
-            return None
+            # Download from FTP
+            return self._download_backup_ftp(filename)
 
         return None
+
+    def _download_backup_ftp(self, filename: str) -> Optional[str]:
+        """Download backup from FTP to tmp directory"""
+        try:
+            ftp = self._ftp_connect()
+            
+            local_path = os.path.join(self.tmp_dir, filename)
+            
+            self.logger.debug(f"Downloading {filename} from FTP")
+            with open(local_path, 'wb') as f:
+                ftp.retrbinary(f'RETR {filename}', f.write)
+            
+            ftp.quit()
+            self.logger.success(f"Downloaded backup from FTP: {filename}")
+            return local_path
+            
+        except Exception as e:
+            self.logger.error(f"Error downloading backup from FTP: {e}")
+            return None
 
     def clean_tmp(self):
         """Remove all files from the tmp directory"""
@@ -383,23 +505,102 @@ class StorageManager:
         Returns:
             True if successful, False otherwise
         """
+        storage_type = self.get_storage_type()
+        
+        if storage_type == 'local':
+            return self.delete_backup_local(filename)
+        else:
+            return self.delete_backup_remote(filename)
+
+    def delete_backup_local(self, filename: str) -> bool:
+        """Delete a backup from local storage"""
         try:
-            storage_type = self.get_storage_type()
-
-            if storage_type == 'local':
-                file_path = self.get_backup_by_name(filename)
-                if file_path and os.path.exists(file_path):
-                    os.remove(file_path)
-                    return True
-            else:
-                # Placeholder for FTP deletion
-                print("Remote FTP deletion not fully implemented yet")
-                return False
-
+            file_path = self.get_backup_by_name(filename)
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                self.logger.debug(f"Deleted backup: {filename}")
+                return True
             return False
         except Exception as e:
+            self.logger.error(f"Failed to delete backup: {e}")
             print(f"Error deleting backup: {e}")
             return False
+
+    def delete_backup_remote(self, filename: str) -> bool:
+        """Delete a backup from remote FTP storage"""
+        try:
+            ftp = self._ftp_connect()
+            
+            self.logger.debug(f"Deleting {filename} from FTP")
+            ftp.delete(filename)
+            
+            ftp.quit()
+            self.logger.success(f"Deleted backup from FTP: {filename}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error deleting backup from FTP: {e}")
+            return False
+    
+    def test_ftp_connection(self) -> Tuple[bool, str]:
+        """
+        Test FTP connection with current configuration
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        self.logger.info("Testing FTP connection")
+        
+        try:
+            remote_config = self.config.get('storage', {}).get('remote', {})
+            hostname = remote_config.get('hostname')
+            port = remote_config.get('port', 21)
+            username = remote_config.get('username', '')
+            directory = remote_config.get('directory', '/backups/sipwise')
+            
+            if not hostname:
+                error_msg = "FTP hostname not configured in config.yml"
+                self.logger.error(f"FTP test failed: {error_msg}")
+                return False, error_msg
+            
+            self.logger.debug(f"Testing FTP connection to {hostname}:{port}")
+            
+            print(f"Testing FTP connection to {hostname}:{port}...")
+            print(f"Username: {username}")
+            print(f"Directory: {directory}")
+            print()
+            
+            # Attempt connection
+            print("[1/4] Connecting to FTP server...")
+            ftp = self._ftp_connect()
+            print("      ✓ Connected successfully")
+            
+            # Test directory listing
+            print("[2/4] Testing directory listing...")
+            files = []
+            ftp.retrlines('LIST', files.append)
+            print(f"      ✓ Listed {len(files)} item(s) in directory")
+            
+            # Test permissions (try to get current directory)
+            print("[3/4] Verifying permissions...")
+            current_dir = ftp.pwd()
+            print(f"      ✓ Current directory: {current_dir}")
+            
+            # Disconnect
+            print("[4/4] Disconnecting...")
+            ftp.quit()
+            print("      ✓ Disconnected successfully")
+            
+            print()
+            success_msg = f"FTP connection test successful! Connected to {hostname}:{port}"
+            self.logger.success("FTP connection test completed successfully")
+            return True, success_msg
+            
+        except Exception as e:
+            error_msg = f"FTP connection test failed: {str(e)}"
+            print(f"\n✗ {error_msg}")
+            self.logger.error(f"FTP test failed: {e}")
+            return False, error_msg
 
 
 # Convenience functions for external use

@@ -23,6 +23,8 @@ storage:
     directory: /opt/sipwise-backup/backups
 
   remote:
+    hostname: ftp.example.com
+    port: 21
     directory: /backups/sipwise
     username: backupuser
     password: changeme
@@ -52,3 +54,39 @@ reboot:
   schedule:
     day_of_month: 1
     time: "03:00"  # 24-hour format HH:MM
+
+# ----------------------------------------------------------
+# Email Notification Settings (SMTP)
+# ----------------------------------------------------------
+email:
+  enabled: false  # Enable/disable email notifications globally
+  
+  # SMTP Server Settings
+  smtp:
+    host: smtp.example.com
+    port: 587
+    username: notifications@example.com
+    password: changeme
+    use_tls: true   # true for TLS (port 587), false for SSL (port 465)
+    use_ssl: false  # true for SSL (port 465), false for TLS
+  
+  # Recipient
+  to_address: admin@example.com
+  
+  # Notification Settings - when to send emails
+  notifications:
+    backup_success: false   # Email on successful backup
+    backup_failure: true    # Email on failed backup
+    reboot_success: true    # Email on successful reboot initiation
+    reboot_failure: true    # Email on failed reboot
+
+# ----------------------------------------------------------
+# Sipwise Configuration Line Numbers
+# ----------------------------------------------------------
+# These line numbers reference specific settings in Sipwise config files
+# Update these if Sipwise changes their configuration structure
+sipwise:
+  constants_yml:
+    sql_encryption_key_line: 293  # Line number for SQL encryption key in /etc/ngcp-config/constants.yml
+  config_yml:
+    firewall_enable_line: 1568    # Line number for firewall enable in /etc/ngcp-config/config.yml

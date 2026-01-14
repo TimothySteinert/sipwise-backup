@@ -22,3 +22,9 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Application directories
+log/
+tmp/
+backups/
+state/

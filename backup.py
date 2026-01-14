@@ -16,6 +16,8 @@ from datetime import datetime
 
 # Import our storage module
 from storage import StorageManager
+from logger import get_logger
+from emailer import get_emailer
 
 
 class BackupManager:
@@ -28,10 +30,12 @@ class BackupManager:
         Args:
             config_path: Path to the configuration file
         """
+        self.config_path = config_path
         self.storage = StorageManager(config_path)
         self.config = self.storage.config
         self.tmp_dir = Path(self.storage.tmp_dir)
         self.ngcp_config_path = Path("/etc/ngcp-config")
+        self.logger = get_logger(config_path)
 
     def _run_command(self, cmd: str) -> str:
         """
@@ -94,14 +98,18 @@ class BackupManager:
         """
         try:
             if not self.ngcp_config_path.exists():
+                self.logger.warn(f"NGCP config not found at {self.ngcp_config_path}")
                 print(f"Warning: NGCP config not found at {self.ngcp_config_path}")
                 return False
 
+            self.logger.debug(f"Backing up NGCP config from {self.ngcp_config_path}")
             print(f"[+] Copying {self.ngcp_config_path}/")
             dest = backup_dir / "ngcp-config"
             shutil.copytree(self.ngcp_config_path, dest)
+            self.logger.success("NGCP config backup completed")
             return True
         except Exception as e:
+            self.logger.error(f"NGCP config backup failed: {e}")
             print(f"Error backing up NGCP config: {e}")
             return False
 
@@ -119,6 +127,7 @@ class BackupManager:
             credentials = self._get_mysql_credentials()
             sql_file = backup_dir / "database.sql"
 
+            self.logger.debug("Starting MySQL database dump")
             print("[+] Dumping full MySQL database...")
             print("    (all databases, routines, triggers, events)")
 
@@ -136,13 +145,15 @@ class BackupManager:
             cmd += f" > {sql_file}"
 
             self._run_command(cmd)
+            self.logger.success("MySQL database dump completed")
             print(f"    Saved to: {sql_file}")
             return True
         except Exception as e:
+            self.logger.error(f"MySQL dump failed: {e}")
             print(f"Error dumping MySQL database: {e}")
             return False
 
-    def run_backup(self) -> Optional[str]:
+    def run_backup(self, backup_type: str = "auto", send_email: bool = True) -> Optional[str]:
         """
         Execute a full backup operation
 
@@ -154,30 +165,42 @@ class BackupManager:
         5. Save to configured storage
         6. Clean up temporary files
 
+        Args:
+            backup_type: Type of backup ("auto" or "manual")
+            send_email: Whether to send email notifications (default: True)
+
         Returns:
             Backup filename if successful, None otherwise
         """
+        self.logger.info(f"Starting {backup_type} backup")
         print("=" * 60)
         print("Starting Backup Process")
         print("=" * 60)
+        
+        emailer = get_emailer(self.config_path)
+        current_stage = "initialization"
 
         try:
             # Step 1: Create backup directory
+            current_stage = "initialization"
             backup_dir = self._create_backup_directory()
             print(f"[+] Working directory: {backup_dir}")
 
             # Step 2: Backup NGCP config
+            current_stage = "NGCP config backup"
             ngcp_success = self._backup_ngcp_config(backup_dir)
             if not ngcp_success:
                 print("Warning: NGCP config backup failed, continuing...")
 
             # Step 3: Dump MySQL database
+            current_stage = "MySQL database dump"
             mysql_success = self._dump_mysql_database(backup_dir)
             if not mysql_success:
                 raise Exception("MySQL dump failed - aborting backup")
 
             # Step 4: Generate backup name and zip
-            backup_filename = self.storage.generate_backup_name()
+            current_stage = "creating backup archive"
+            backup_filename = self.storage.generate_backup_name(backup_type=backup_type)
             print(f"[+] Creating backup archive: {backup_filename}")
 
             zip_path = self.storage.zip_directory(
@@ -187,6 +210,7 @@ class BackupManager:
             print(f"    Backup size: {os.path.getsize(zip_path) / (1024*1024):.2f} MB")
 
             # Step 5: Save to storage
+            current_stage = "saving to storage"
             print(f"[+] Saving backup to {self.storage.get_storage_type()} storage...")
             save_success = self.storage.save_backup(zip_path)
 
@@ -202,6 +226,17 @@ class BackupManager:
             print("=" * 60)
             print(f"[OK] Backup completed successfully: {backup_filename}")
             print("=" * 60)
+            
+            # Send success email for all backup types if enabled
+            if send_email:
+                self.logger.info(f"Backup completed: {backup_filename}")
+                emailer.send_backup_success(
+                    backup_filename=backup_filename,
+                    storage_location=self.storage.get_storage_directory(),
+                    retention_applied=False,  # Basic backup doesn't apply retention
+                    cleanup_applied=False,
+                    deleted_count=0
+                )
 
             return backup_filename
 
@@ -215,6 +250,14 @@ class BackupManager:
                 self.storage.clean_tmp()
             except:
                 pass
+            
+            # Send failure email for all backup types if enabled
+            if send_email:
+                self.logger.error(f"Backup failed at stage '{current_stage}': {e}")
+                emailer.send_backup_failure(
+                    error_message=str(e),
+                    stage=current_stage
+                )
 
             return None
 

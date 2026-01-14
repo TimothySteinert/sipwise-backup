@@ -8,6 +8,7 @@ Version: 1.0.0
 import sys
 import os
 import subprocess
+import traceback
 
 # Add parent directory to path to import backup module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,16 +19,27 @@ from restore import RestoreManager
 
 class SipwiseBackupCLI:
     """Main CLI class for sipwise-backup application"""
+    
+    # Table formatting constants
+    BACKUP_TABLE_SEPARATOR_LENGTH = 77  # Length of separator line for backup tables
 
     def __init__(self):
         self.version = "1.0.0"
         self.running = True
         self.install_dir = "/opt/sipwise-backup"
         self.config_file = os.path.join(self.install_dir, "config.yml")
+        self._storage_manager = None  # Lazy-loaded storage manager cache
 
     def clear_screen(self):
         """Clear the terminal screen"""
         os.system('clear')
+
+    @property
+    def storage_manager(self):
+        """Lazy-loaded storage manager instance"""
+        if self._storage_manager is None:
+            self._storage_manager = StorageManager(self.config_file)
+        return self._storage_manager
 
     def show_banner(self):
         """Display application banner"""
@@ -51,7 +63,9 @@ class SipwiseBackupCLI:
         print("\n--- Config Menu ---")
         print("(1) Edit config.yml")
         print("(2) Restart service")
-        print("(3) Return to main menu")
+        print("(3) Test Send Email")
+        print("(4) Test FTP Connection")
+        print("(5) Return to main menu")
         print()
 
     def get_user_choice(self):
@@ -92,6 +106,124 @@ class SipwiseBackupCLI:
         except PermissionError:
             print("Error: Permission denied. Try running:")
             print("  sudo systemctl restart sipwise-backup")
+        
+        print()
+        input("Press Enter to continue...")
+    
+    def test_send_email(self):
+        """Test email configuration by sending a test email"""
+        print("\n" + "=" * 60)
+        print("Test Email Configuration")
+        print("=" * 60)
+        print()
+        
+        try:
+            # Import emailer module (path already configured at module level)
+            from emailer import EmailNotifier
+            
+            # Create emailer instance
+            emailer = EmailNotifier(self.config_file)
+            
+            # Check if email is enabled
+            if not emailer.is_enabled():
+                print("Email notifications are currently DISABLED in config.yml")
+                print()
+                print("To enable email notifications:")
+                print("  1. Edit config.yml (option 1 from config menu)")
+                print("  2. Set email.enabled to true")
+                print("  3. Configure SMTP settings")
+                print()
+                input("Press Enter to continue...")
+                return
+            
+            # Display current config
+            email_config = emailer.config.get('email', {})
+            smtp_config = email_config.get('smtp', {})
+            print("Current Email Configuration:")
+            print(f"  SMTP Host: {smtp_config.get('host')}")
+            print(f"  SMTP Port: {smtp_config.get('port')}")
+            print(f"  Username: {smtp_config.get('username')}")
+            print(f"  Use TLS: {smtp_config.get('use_tls')}")
+            print(f"  Use SSL: {smtp_config.get('use_ssl')}")
+            print(f"  To: {email_config.get('to_address')}")
+            print()
+            
+            print("Sending test email...")
+            print()
+            
+            # Send test email
+            success = emailer.test_send_email()
+            
+            print()
+            if success:
+                print("✓ Test email sent successfully!")
+                print(f"  Check your inbox at: {email_config.get('to_address')}")
+            else:
+                print("✗ Failed to send test email.")
+                print("  Check the error messages above for details.")
+            
+        except Exception as e:
+            print(f"✗ Error testing email: {e}")
+            traceback.print_exc()
+        
+        print()
+        input("Press Enter to continue...")
+    
+    def test_ftp_connection(self):
+        """Test FTP configuration by connecting to the FTP server"""
+        print("\n" + "=" * 60)
+        print("Test FTP Connection")
+        print("=" * 60)
+        print()
+        
+        try:
+            # Check if storage type is remote
+            storage = self.storage_manager
+            storage_type = storage.get_storage_type()
+            
+            if storage_type != 'remote':
+                print(f"Storage type is currently set to: {storage_type}")
+                print()
+                print("FTP testing is only available when storage.type is set to 'remote'")
+                print()
+                print("To test FTP:")
+                print("  1. Edit config.yml (option 1 from config menu)")
+                print("  2. Set storage.type to 'remote'")
+                print("  3. Configure FTP settings under storage.remote")
+                print()
+                input("Press Enter to continue...")
+                return
+            
+            # Display current FTP config
+            remote_config = storage.config.get('storage', {}).get('remote', {})
+            print("Current FTP Configuration:")
+            print(f"  Hostname: {remote_config.get('hostname')}")
+            print(f"  Port: {remote_config.get('port', 21)}")
+            print(f"  Username: {remote_config.get('username')}")
+            print(f"  Directory: {remote_config.get('directory')}")
+            print()
+            
+            # Test connection
+            success, message = storage.test_ftp_connection()
+            
+            print()
+            if success:
+                print(f"✓ {message}")
+            else:
+                print(f"✗ {message}")
+                print()
+                print("Common issues:")
+                print("  - Incorrect hostname or port")
+                print("  - Invalid username or password")
+                print("  - Firewall blocking connection")
+                print("  - FTP server not running")
+            
+        except Exception as e:
+            print(f"✗ Error testing FTP: {e}")
+            traceback.print_exc()
+        
+        print()
+        input("Press Enter to continue...")
 
     def handle_config_menu(self):
         """Handle config menu navigation"""
@@ -107,6 +239,10 @@ class SipwiseBackupCLI:
             elif choice == "2":
                 self.restart_service()
             elif choice == "3":
+                self.test_send_email()
+            elif choice == "4":
+                self.test_ftp_connection()
+            elif choice == "5":
                 in_config_menu = False
             elif choice == "exit":
                 self.handle_exit()
@@ -134,7 +270,7 @@ class SipwiseBackupCLI:
             print("Starting manual backup...")
             print()
 
-            result = backup_manager.run_backup()
+            result = backup_manager.run_backup(backup_type="manual")
 
             print()
             if result:
@@ -157,7 +293,7 @@ class SipwiseBackupCLI:
     def handle_list_backups(self):
         """Handle list backups menu"""
         try:
-            storage = StorageManager(self.config_file)
+            storage = self.storage_manager
             backups = storage.list_backups()
             page_size = 15
             current_page = 0
@@ -190,15 +326,18 @@ class SipwiseBackupCLI:
                     page_backups = backups[start_idx:end_idx]
 
                     # Display table header
-                    print(f"{'#':<4} {'Server Name':<25} {'Type':<10} {'Date & Time':<20}")
-                    print("-" * 80)
+                    print(f"{'#':<4} {'Server Name':<25} {'Type':<12} {'Backup Type':<12} {'Date & Time':<20}")
+                    print("-" * self.BACKUP_TABLE_SEPARATOR_LENGTH)
 
                     # Display backups
                     for idx, backup in enumerate(page_backups, start=start_idx + 1):
                         server_name = backup['server_name']
                         instance_type = backup['instance_type']
+                        backup_type = backup.get('type', 'unknown')
+                        # Display type with capitalization
+                        type_display = backup_type.capitalize() if backup_type != 'unknown' else 'Unknown'
                         dt = backup['datetime'].strftime('%d/%m/%Y %H:%M')
-                        print(f"{idx:<4} {server_name:<25} {instance_type:<10} {dt:<20}")
+                        print(f"{idx:<4} {server_name:<25} {instance_type:<12} {type_display:<12} {dt:<20}")
 
                     print()
                     print(f"Page {current_page + 1} of {total_pages} (Total backups: {len(backups)})")
@@ -241,7 +380,7 @@ class SipwiseBackupCLI:
     def handle_restore_backup(self):
         """Handle restore backup menu"""
         try:
-            storage = StorageManager(self.config_file)
+            storage = self.storage_manager
             backups = storage.list_backups()
 
             in_restore_menu = True
@@ -264,14 +403,17 @@ class SipwiseBackupCLI:
                     continue
 
                 # Display available backups
-                print(f"{'#':<4} {'Server Name':<25} {'Type':<10} {'Date & Time':<20}")
-                print("-" * 80)
+                print(f"{'#':<4} {'Server Name':<25} {'Type':<12} {'Backup Type':<12} {'Date & Time':<20}")
+                print("-" * self.BACKUP_TABLE_SEPARATOR_LENGTH)
 
                 for idx, backup in enumerate(backups, start=1):
                     server_name = backup['server_name']
                     instance_type = backup['instance_type']
+                    backup_type = backup.get('type', 'unknown')
+                    # Display type with capitalization
+                    type_display = backup_type.capitalize() if backup_type != 'unknown' else 'Unknown'
                     dt = backup['datetime'].strftime('%d/%m/%Y %H:%M')
-                    print(f"{idx:<4} {server_name:<25} {instance_type:<10} {dt:<20}")
+                    print(f"{idx:<4} {server_name:<25} {instance_type:<12} {type_display:<12} {dt:<20}")
 
                 print()
                 print("(0) Return to main menu")
@@ -303,75 +445,191 @@ class SipwiseBackupCLI:
         self.show_banner()
 
     def handle_restore_confirmation(self, backup):
-        """Handle restore confirmation process"""
+        """Handle restore confirmation process with different flows for same/different server"""
         self.clear_screen()
         self.show_banner()
-
+        
         backup_name = backup['filename']
-        print("=" * 80)
-        print("Restore Confirmation")
-        print("=" * 80)
-        print()
-        print(f"Backup: {backup_name}")
-        print(f"Server: {backup['server_name']}")
-        print(f"Type: {backup['instance_type']}")
-        print(f"Date: {backup['datetime'].strftime('%d/%m/%Y %H:%M')}")
-        print()
+        backup_server = backup['server_name']
+        backup_type = backup['instance_type']
+        backup_date = backup['datetime'].strftime('%d/%m/%Y %H:%M')
+        
+        # Get current server info using cached storage manager
+        current_server = self.storage_manager.config.get('server_name', '')
+        current_type = self.storage_manager.config.get('instance_type', '')
+        
+        # Check if same server
+        is_same_server = (backup_server == current_server and backup_type == current_type)
+        
+        if is_same_server:
+            # SAME SERVER RESTORE FLOW
+            self._handle_same_server_restore(backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type)
+        else:
+            # DIFFERENT SERVER RESTORE FLOW (DR scenario)
+            self._handle_different_server_restore(backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type)
 
-        # Step 1: Confirm restore
-        print("Restore this backup? (Y/N): ", end="")
+    def _handle_same_server_restore(self, backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type):
+        """Handle restore to the same server"""
+        print("=" * 80)
+        print("Restore Summary - Same Server")
+        print("=" * 80)
+        print()
+        print(f"Restoring from: {backup_server} ({backup_type}) - {backup_date}")
+        print(f"Restoring to:   {current_server} ({current_type})")
+        print()
+        print("!" * 80)
+        print("WARNING: This will reboot services and stop any in-progress calls!")
+        print("!" * 80)
+        print()
+        print("Proceed with restore? (Y/N): ", end="")
         confirm = input().strip().upper()
-
+        
         if confirm != "Y":
             print("\nRestore cancelled.")
             input("\nPress Enter to continue...")
             return
+        
+        # Execute restore - same server means:
+        # - No SQL key prompt (restore entire constants.yml)
+        # - No firewall prompt
+        # - No DR warning
+        self._execute_restore(
+            backup_name,
+            preserve_sql_key=False,  # Restore entire constants.yml since same server
+            disable_firewall=False,
+            restore_sip_register=True
+        )
 
-        # Step 2: Preserve SQL encryption key
-        print("\nPreserve current SQL encryption key? (Y/N): ", end="")
-        preserve_key = input().strip().upper()
-        preserve_sql_key = (preserve_key == "Y")
-
-        # Step 3: Restore SIP register data with warning
-        print("\n" + "!" * 80)
-        print("WARNING: THIS WILL MAKE THE ENVIRONMENT LIVE!")
-        print("Ensure no other instances are running before continuing.")
+    def _handle_different_server_restore(self, backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type):
+        """Handle restore to a different server (DR scenario)"""
+        
+        # Step 1: SQL Encryption Key Warning
+        print("=" * 80)
+        print("SQL Encryption Key")
+        print("=" * 80)
+        print()
         print("!" * 80)
-        print("\nPress N to return to menu or Y to continue: ", end="")
-        sip_register = input().strip().upper()
-
-        if sip_register != "Y":
+        print("WARNING: When restoring to a DR server, you MUST retain the")
+        print("original SQL encryption key to access encrypted database fields!")
+        print("!" * 80)
+        print()
+        print("Preserve current SQL encryption key? (Y/N)")
+        print("(Recommended: Y for DR restore)")
+        print()
+        print("Choice: ", end="")
+        preserve_key = input().strip().upper()
+        
+        if preserve_key != "Y":
+            print("\n" + "!" * 80)
+            print("Are you SURE you want to use the SQL key from the backup?")
+            print("This may cause data access issues on a DR server!")
+            print("!" * 80)
+            print("\nContinue without preserving key? (Y/N): ", end="")
+            confirm = input().strip().upper()
+            if confirm != "Y":
+                print("\nRestore cancelled.")
+                input("\nPress Enter to continue...")
+                return
+        
+        preserve_sql_key = (preserve_key == "Y")
+        
+        # Step 2: Firewall Rules
+        self.clear_screen()
+        self.show_banner()
+        print("=" * 80)
+        print("Firewall Configuration")
+        print("=" * 80)
+        print()
+        print("Do you want to deactivate firewall rules?")
+        print()
+        print("!" * 80)
+        print("WARNING: Changing the server IP may result in the web UI")
+        print("becoming inaccessible if firewall rules block the new IP.")
+        print("!" * 80)
+        print()
+        print("Recommended: Y (disable firewall, then manually verify and re-enable)")
+        print()
+        print("Deactivate firewall? (Y/N): ", end="")
+        firewall_choice = input().strip().upper()
+        disable_firewall = (firewall_choice == "Y")
+        
+        # Step 3: Final Summary and DR Warning
+        self.clear_screen()
+        self.show_banner()
+        
+        # Get system IP using public static method
+        system_ip = RestoreManager.get_system_ipv4_static()
+        
+        print("=" * 80)
+        print("Restore Summary - DR Server")
+        print("=" * 80)
+        print()
+        print(f"Restoring from: {backup_server} ({backup_type}) - {backup_date}")
+        print(f"Restoring to:   {current_server} ({current_type})")
+        print()
+        print(f"SQL Key:        {'Preserve current' if preserve_sql_key else 'Use from backup'}")
+        print(f"Firewall:       {'Disable' if disable_firewall else 'Keep enabled'}")
+        print()
+        print("!" * 80)
+        print("CRITICAL DR WARNING")
+        print("!" * 80)
+        print()
+        print("This restore will register to peers after completion.")
+        print("The MASTER server must be OFFLINE before proceeding!")
+        print()
+        print("DO NOT PROCEED IF THIS IS NOT A DR SITUATION!")
+        print()
+        print("Once completed, only a SINGLE instance (either DR or Master)")
+        print("can be active at any time.")
+        print()
+        print(f"Update DNS records to point to: {system_ip}")
+        print("to allow subscribers to connect to the DR server.")
+        print()
+        print("!" * 80)
+        print()
+        print("Proceed with DR restore? (Y/N): ", end="")
+        confirm = input().strip().upper()
+        
+        if confirm != "Y":
             print("\nRestore cancelled.")
             input("\nPress Enter to continue...")
             return
-
-        restore_sip_register = True
-
+        
         # Execute restore
+        self._execute_restore(
+            backup_name,
+            preserve_sql_key=preserve_sql_key,
+            disable_firewall=disable_firewall,
+            restore_sip_register=True
+        )
+
+    def _execute_restore(self, backup_name, preserve_sql_key, disable_firewall, restore_sip_register):
+        """Execute the actual restore operation"""
         print()
         print("=" * 80)
         print("Starting restore operation...")
         print("=" * 80)
         print()
-
+        
         try:
             restore_manager = RestoreManager(self.config_file)
             success = restore_manager.run_restore(
                 backup_name,
                 preserve_sql_key=preserve_sql_key,
-                restore_sip_register=restore_sip_register
+                restore_sip_register=restore_sip_register,
+                disable_firewall=disable_firewall
             )
-
+            
             print()
             if success:
                 print("✓ Restore completed successfully!")
             else:
                 print("✗ Restore failed. Check the output above for errors.")
-
+        
         except Exception as e:
             print()
             print(f"✗ Error during restore: {e}")
-
+        
         print()
         print("Press Enter to return to main menu...")
         input()
