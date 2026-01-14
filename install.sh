@@ -9,6 +9,7 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Installation directories
@@ -17,6 +18,7 @@ INSTALL_BIN_DIR="/usr/bin"
 SERVICE_DIR="/etc/systemd/system"
 APP_NAME="sipwise-backup"
 ZIP_FILE="$APP_NAME.zip"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "======================================"
 echo "  sipwise-backup Installation"
@@ -55,7 +57,7 @@ fi
 echo -e "${GREEN}✓ Python dependencies checked${NC}"
 
 # Check if zip file exists in current directory
-if [ ! -f "./$ZIP_FILE" ]; then
+if [ ! -f "$SCRIPT_DIR/$ZIP_FILE" ]; then
     echo -e "${RED}Error: $ZIP_FILE not found in current directory${NC}"
     echo "Please ensure $ZIP_FILE is in the same directory as this install script."
     exit 1
@@ -77,7 +79,7 @@ mkdir -p "$INSTALL_DIR"
 
 # Extract zip file to installation directory using Python
 echo "Extracting $ZIP_FILE to $INSTALL_DIR..."
-python3 -c "import zipfile; zipfile.ZipFile('./$ZIP_FILE').extractall('$INSTALL_DIR')"
+python3 -c "import zipfile; zipfile.ZipFile('$SCRIPT_DIR/$ZIP_FILE').extractall('$INSTALL_DIR')"
 
 # Create log directory
 echo "Creating log directory..."
@@ -121,10 +123,315 @@ echo "Starting $APP_NAME service..."
 systemctl start "$APP_NAME.service"
 
 echo ""
+echo -e "${GREEN}✓ Base installation completed successfully!${NC}"
+echo ""
+
+# Configuration Phase
+echo "======================================"
+echo "  Configuration Setup"
+echo "======================================"
+echo ""
+
+# Ask if Master or DR server
+while true; do
+    echo -e "${BLUE}Is this a Master or DR Server?${NC}"
+    echo "1) Master"
+    echo "2) DR"
+    read -p "Enter choice [1-2]: " server_type_choice
+
+    case $server_type_choice in
+        1)
+            SERVER_TYPE="master"
+            break
+            ;;
+        2)
+            SERVER_TYPE="dr"
+            break
+            ;;
+        *)
+            echo -e "${RED}Invalid choice. Please enter 1 or 2.${NC}"
+            ;;
+    esac
+done
+
+echo ""
+
+# Variables for later use
+USE_BACKUP_CONFIG=false
+USE_TEMPLATE=false
+
+if [ "$SERVER_TYPE" = "master" ]; then
+    # Master server configuration
+    echo -e "${BLUE}Master Server Configuration${NC}"
+    echo ""
+    read -p "Enter server name: " SERVER_NAME
+
+    # Update config.yml with server name and instance type
+    CONFIG_FILE="$INSTALL_DIR/config.yml"
+
+    echo "Updating configuration..."
+    python3 << EOF
+import yaml
+
+config_file = '$CONFIG_FILE'
+with open(config_file, 'r') as f:
+    config = yaml.safe_load(f)
+
+config['server_name'] = '$SERVER_NAME'
+config['instance_type'] = 'master'
+
+with open(config_file, 'w') as f:
+    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+EOF
+
+    echo -e "${GREEN}✓ Configuration updated${NC}"
+    echo ""
+
+else
+    # DR server configuration
+    echo -e "${BLUE}DR Server Configuration${NC}"
+    echo ""
+
+    # Check if backup config.yml exists
+    if [ -f "$SCRIPT_DIR/config.yml" ]; then
+        read -p "Backup config.yml found. Do you want to install from backup config.yml? (y/n): " use_backup
+        if [[ "$use_backup" =~ ^[Yy]$ ]]; then
+            echo "Copying backup config.yml..."
+            cp "$SCRIPT_DIR/config.yml" "$INSTALL_DIR/config.yml"
+            USE_BACKUP_CONFIG=true
+            echo -e "${GREEN}✓ Backup config.yml installed${NC}"
+        fi
+        echo ""
+    fi
+
+    # Check if setup.template exists
+    if [ -f "$SCRIPT_DIR/setup.template" ]; then
+        read -p "Setup template found. Do you want to install from template? (y/n): " use_template
+        if [[ "$use_template" =~ ^[Yy]$ ]]; then
+            USE_TEMPLATE=true
+            echo -e "${GREEN}✓ Template will be processed after configuration${NC}"
+        fi
+        echo ""
+    fi
+
+    # Ask for server name
+    read -p "Enter server name: " SERVER_NAME
+    echo ""
+
+    # Update config.yml with server name and instance type
+    CONFIG_FILE="$INSTALL_DIR/config.yml"
+
+    echo "Updating server configuration..."
+    python3 << EOF
+import yaml
+
+config_file = '$CONFIG_FILE'
+with open(config_file, 'r') as f:
+    config = yaml.safe_load(f)
+
+config['server_name'] = '$SERVER_NAME'
+config['instance_type'] = 'dr'
+
+with open(config_file, 'w') as f:
+    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+EOF
+
+    echo -e "${GREEN}✓ Server configuration updated${NC}"
+    echo ""
+
+    # Process template if selected
+    if [ "$USE_TEMPLATE" = true ]; then
+        echo "======================================"
+        echo "  Processing Setup Template"
+        echo "======================================"
+        echo ""
+
+        TEMPLATE_FILE="$SCRIPT_DIR/setup.template"
+
+        # Parse template and extract values
+        echo "Parsing template file..."
+
+        # Extract passwords from template
+        CDREXPORT_PASSWORD=$(python3 << 'EOF'
+import yaml
+import sys
+
+template_file = sys.argv[1]
+with open(template_file, 'r') as f:
+    template = yaml.safe_load(f)
+
+system_users = template.get('system_users', {})
+cdrexport = system_users.get('cdrexport', {})
+password = cdrexport.get('password', '')
+print(password)
+EOF
+"$TEMPLATE_FILE")
+
+        ROOT_PASSWORD=$(python3 << 'EOF'
+import yaml
+import sys
+
+template_file = sys.argv[1]
+with open(template_file, 'r') as f:
+    template = yaml.safe_load(f)
+
+system_users = template.get('system_users', {})
+root = system_users.get('root', {})
+password = root.get('password', '')
+print(password)
+EOF
+"$TEMPLATE_FILE")
+
+        MYSQL_ROOT_PASSWORD=$(python3 << 'EOF'
+import yaml
+import sys
+
+template_file = sys.argv[1]
+with open(template_file, 'r') as f:
+    template = yaml.safe_load(f)
+
+mysql = template.get('mysql', {})
+password = mysql.get('root_password', '')
+print(password)
+EOF
+"$TEMPLATE_FILE")
+
+        # Set system user passwords
+        if [ -n "$CDREXPORT_PASSWORD" ]; then
+            echo "Setting password for cdrexport user..."
+            if id "cdrexport" &>/dev/null; then
+                echo "cdrexport:$CDREXPORT_PASSWORD" | chpasswd
+                echo -e "${GREEN}✓ cdrexport password set${NC}"
+            else
+                echo -e "${YELLOW}Warning: cdrexport user does not exist, skipping${NC}"
+            fi
+        fi
+
+        if [ -n "$ROOT_PASSWORD" ]; then
+            echo "Setting password for root user..."
+            echo "root:$ROOT_PASSWORD" | chpasswd
+            echo -e "${GREEN}✓ root password set${NC}"
+        fi
+
+        echo ""
+
+        # Set MySQL root password
+        if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
+            echo "Setting MySQL root password..."
+            if command -v mysql &> /dev/null; then
+                mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';" 2>/dev/null || true
+                echo -e "${GREEN}✓ MySQL root password set${NC}"
+            else
+                echo -e "${YELLOW}Warning: MySQL not found, skipping MySQL password setup${NC}"
+            fi
+        fi
+
+        echo ""
+
+        # Create MySQL users from template
+        echo "Creating MySQL users..."
+        python3 << 'PYEOF'
+import yaml
+import subprocess
+import sys
+
+template_file = sys.argv[1]
+mysql_root_password = sys.argv[2]
+
+with open(template_file, 'r') as f:
+    template = yaml.safe_load(f)
+
+mysql_config = template.get('mysql', {})
+users = mysql_config.get('users', [])
+
+for user in users:
+    username = user.get('username')
+    password = user.get('password')
+    privileges = user.get('privileges', 'ALL PRIVILEGES')
+    host = user.get('host', 'localhost')
+
+    if username and password:
+        print(f"Creating MySQL user: {username}@{host}")
+
+        # Create user
+        create_cmd = f"CREATE USER IF NOT EXISTS '{username}'@'{host}' IDENTIFIED BY '{password}';"
+        subprocess.run(['mysql', f'-proot:{mysql_root_password}', '-e', create_cmd],
+                      stderr=subprocess.DEVNULL, check=False)
+
+        # Grant privileges
+        grant_cmd = f"GRANT {privileges} ON *.* TO '{username}'@'{host}';"
+        subprocess.run(['mysql', f'-proot:{mysql_root_password}', '-e', grant_cmd],
+                      stderr=subprocess.DEVNULL, check=False)
+
+        # Flush privileges
+        flush_cmd = "FLUSH PRIVILEGES;"
+        subprocess.run(['mysql', f'-proot:{mysql_root_password}', '-e', flush_cmd],
+                      stderr=subprocess.DEVNULL, check=False)
+
+        print(f"✓ User {username}@{host} created with {privileges}")
+PYEOF
+"$TEMPLATE_FILE" "$MYSQL_ROOT_PASSWORD"
+
+        echo ""
+
+        # Update config.yml with MySQL credentials from template
+        echo "Updating config.yml with MySQL credentials..."
+        python3 << 'PYEOF'
+import yaml
+import sys
+
+template_file = sys.argv[1]
+config_file = sys.argv[2]
+
+# Read template
+with open(template_file, 'r') as f:
+    template = yaml.safe_load(f)
+
+# Read config
+with open(config_file, 'r') as f:
+    config = yaml.safe_load(f)
+
+# Get first MySQL user from template
+mysql_config = template.get('mysql', {})
+users = mysql_config.get('users', [])
+
+if users:
+    first_user = users[0]
+    username = first_user.get('username')
+    password = first_user.get('password')
+
+    if username and password:
+        # Update config
+        if 'mysql' not in config:
+            config['mysql'] = {}
+
+        config['mysql']['user'] = username
+        config['mysql']['password'] = password
+
+        # Write config
+        with open(config_file, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+        print(f"✓ Config updated with MySQL user: {username}")
+PYEOF
+"$TEMPLATE_FILE" "$CONFIG_FILE"
+
+        echo -e "${GREEN}✓ Template processing completed${NC}"
+        echo ""
+    fi
+fi
+
+echo ""
+echo "======================================"
 echo -e "${GREEN}✓ Installation completed successfully!${NC}"
+echo "======================================"
 echo ""
 echo "Installation location: $INSTALL_DIR"
-echo "The $APP_NAME service has been enabled and started."
+echo "Server type: $SERVER_TYPE"
+echo "Server name: $SERVER_NAME"
+echo ""
+echo -e "${YELLOW}Please review the configuration file and adjust required settings:${NC}"
+echo "  Configuration file: $INSTALL_DIR/config.yml"
 echo ""
 echo "You can now:"
 echo "  1. Run the CLI: $APP_NAME"

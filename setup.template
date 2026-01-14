@@ -1,0 +1,21 @@
+# Installation Configuration Template
+# This file is read by install.sh to configure system settings
+# Fill in the values before running the installation script
+
+# System User Passwords
+system_users:
+  cdrexport:
+    password: ""
+  root:
+    password: ""
+
+# MySQL Configuration
+mysql:
+  root_password: ""
+
+  # Additional MySQL users to create
+  users:
+    - username: "Backup-User"
+      password: ""
+      privileges: "ALL PRIVILEGES"
+      host: "localhost"
