@@ -558,11 +558,11 @@ class BackupScheduler:
                     self.run_scheduled_backup()
                     last_backup_time = current_time
                     
-                    # Save state after backup
-                    self._save_state({
-                        'last_backup_time': last_backup_time,
-                        'last_reboot_month': self.last_reboot_month
-                    })
+                    # Save state after backup (preserve pending_reboot_notification if it exists)
+                    state = self._load_state()
+                    state['last_backup_time'] = last_backup_time
+                    state['last_reboot_month'] = self.last_reboot_month
+                    self._save_state(state)
 
                     # Recalculate frequency in case config changed
                     frequency_seconds = self.get_backup_frequency_seconds()
@@ -579,11 +579,11 @@ class BackupScheduler:
                         if self.last_reboot_month != current_month_key:
                             # Update tracking before reboot to prevent race condition
                             self.last_reboot_month = current_month_key
-                            # Save state before reboot
-                            self._save_state({
-                                'last_backup_time': last_backup_time,
-                                'last_reboot_month': self.last_reboot_month
-                            })
+                            # Save state before reboot (preserve pending_reboot_notification if it exists)
+                            state = self._load_state()
+                            state['last_backup_time'] = last_backup_time
+                            state['last_reboot_month'] = self.last_reboot_month
+                            self._save_state(state)
                             self.perform_reboot()
 
                 # Sleep for a minute before checking again

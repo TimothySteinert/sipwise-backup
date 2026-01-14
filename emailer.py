@@ -411,9 +411,13 @@ def notify_backup_failure(**kwargs) -> bool:
     """Send backup failure notification"""
     return get_emailer().send_backup_failure(**kwargs)
 
-def notify_reboot_success() -> bool:
-    """Send reboot success notification"""
-    return get_emailer().send_reboot_success()
+def notify_reboot_success(reboot_initiated_at: datetime = None) -> bool:
+    """Send reboot success notification
+    
+    Args:
+        reboot_initiated_at: Optional timestamp of when reboot was initiated
+    """
+    return get_emailer().send_reboot_success(reboot_initiated_at=reboot_initiated_at)
 
 def notify_reboot_failure(**kwargs) -> bool:
     """Send reboot failure notification"""
