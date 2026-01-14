@@ -34,7 +34,7 @@ storage:
 # ----------------------------------------------------------
 backup:
   automatic:
-    enabled: true
+    enabled: false
     frequency:
       value: 1
       unit: hours  # minutes | hours
@@ -89,4 +89,4 @@ sipwise:
   constants_yml:
     sql_encryption_key_line: 293  # Line number for SQL encryption key in /etc/ngcp-config/constants.yml
   config_yml:
-    firewall_enable_line: 1568    # Line number for firewall enable in /etc/ngcp-config/config.yml
+    firewall_enable_line: 1578    # Line number for firewall enable in /etc/ngcp-config/config.yml
