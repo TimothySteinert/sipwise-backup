@@ -496,8 +496,7 @@ class SipwiseBackupCLI:
         self._execute_restore(
             backup_name,
             preserve_sql_key=False,  # Restore entire constants.yml since same server
-            disable_firewall=False,
-            restore_sip_register=True
+            disable_firewall=False
         )
 
     def _handle_different_server_restore(self, backup, backup_name, backup_server, backup_type, backup_date, current_server, current_type):
@@ -599,24 +598,22 @@ class SipwiseBackupCLI:
         self._execute_restore(
             backup_name,
             preserve_sql_key=preserve_sql_key,
-            disable_firewall=disable_firewall,
-            restore_sip_register=True
+            disable_firewall=disable_firewall
         )
 
-    def _execute_restore(self, backup_name, preserve_sql_key, disable_firewall, restore_sip_register):
+    def _execute_restore(self, backup_name, preserve_sql_key, disable_firewall):
         """Execute the actual restore operation"""
         print()
         print("=" * 80)
         print("Starting restore operation...")
         print("=" * 80)
         print()
-        
+
         try:
             restore_manager = RestoreManager(self.config_file)
             success = restore_manager.run_restore(
                 backup_name,
                 preserve_sql_key=preserve_sql_key,
-                restore_sip_register=restore_sip_register,
                 disable_firewall=disable_firewall
             )
             
